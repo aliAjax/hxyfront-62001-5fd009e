@@ -5,6 +5,10 @@ import { ShiftSelector } from "./shifts/ShiftSelector";
 import { EngineRoomPanel } from "./shifts/EngineRoomPanel";
 import { useShift } from "./shifts/ShiftContext";
 
+import { DeviceHistoryPage } from "./shifts/DeviceHistoryPage";
+
+type Page = "dashboard" | "history";
+
 const project = {
   id: "hxyfront-62001",
   port: 62001,
@@ -138,23 +142,26 @@ function RecordForm() {
   );
 }
 
-function FilterAside() {
-  const [activeFilter, setActiveFilter] = useState<string | null>(null);
-
+function NavAside({ onNavigate }: { onNavigate: (page: Page) => void }) {
   return (
     <aside className="panel">
-      <h2>{project.domain}筛选</h2>
+      <h2>{project.domain}导航</h2>
       <div className="chips">
         {project.filters.map((item) => (
           <button
             key={item}
-            className={activeFilter === item ? "active" : ""}
-            onClick={() => setActiveFilter(activeFilter === item ? null : item)}
+            onClick={() => onNavigate("history")}
           >
             {item}
           </button>
         ))}
       </div>
+      <button
+        className="primary history-nav-btn"
+        onClick={() => onNavigate("history")}
+      >
+        查看设备历史记录 →
+      </button>
     </aside>
   );
 }
@@ -196,6 +203,11 @@ function HistoryRecords() {
 
 function AppContent() {
   const { currentShift } = useShift();
+  const [page, setPage] = useState<Page>("dashboard");
+
+  if (page === "history") {
+    return <DeviceHistoryPage onBack={() => setPage("dashboard")} />;
+  }
 
   return (
     <main className="app">
@@ -214,7 +226,7 @@ function AppContent() {
       <EngineRoomPanel />
 
       <section className="workspace">
-        <FilterAside />
+        <NavAside onNavigate={setPage} />
         <RecordForm />
       </section>
 
