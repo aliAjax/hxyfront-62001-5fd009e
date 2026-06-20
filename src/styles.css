@@ -18,7 +18,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -28,6 +29,22 @@ button {
   border-radius: 7px;
   background: #ffffff;
   color: #172033;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+button:hover {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, #ffffff);
+}
+
+select {
+  width: 100%;
+  min-height: 42px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  padding: 0 12px;
+  background: #ffffff;
   cursor: pointer;
 }
 
@@ -99,6 +116,13 @@ button {
   display: block;
   margin-top: 10px;
   font-size: 30px;
+}
+
+.metrics .unit {
+  font-size: 14px;
+  font-weight: 400;
+  color: #64748b;
+  margin-left: 4px;
 }
 
 .workspace {
@@ -219,4 +243,75 @@ input {
     min-height: 210px;
     padding: 24px;
   }
+
+  .shift-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+.shift-selector {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 18px 0;
+  padding: 14px 20px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(31, 41, 55, 0.08);
+}
+
+.shift-label {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.shift-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.shift-tab {
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #526071;
+  background: #f5f7fb;
+  border: 1px solid var(--border);
+}
+
+.shift-tab:hover {
+  background: color-mix(in srgb, var(--primary) 8%, #ffffff);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.shift-tab.active {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: #94a3b8;
+  font-size: 15px;
+}
+
+.chips button.active {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+}
+
+.hero strong {
+  color: var(--accent);
 }
