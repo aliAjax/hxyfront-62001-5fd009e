@@ -315,3 +315,37 @@ input {
 .hero strong {
   color: var(--accent);
 }
+
+.engine-room-panel {
+  margin-bottom: 18px;
+}
+
+.input-error {
+  border-color: #ef4444 !important;
+  background: #fef2f2;
+}
+
+.error-text {
+  color: #ef4444;
+  font-size: 12px;
+  margin-top: -4px;
+}
+
+.last-record {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  text-align: right;
+}
+
+.last-record small {
+  color: #64748b;
+}
+
+.record-time {
+  display: block;
+  margin-top: 8px;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.4;
+}

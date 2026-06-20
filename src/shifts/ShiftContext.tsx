@@ -9,11 +9,14 @@ import {
 import {
   type Shift,
   type WatchRecord,
+  type EngineRoomRecord,
   SHIFTS,
   loadCurrentShiftId,
   saveCurrentShiftId,
   loadAllRecords,
   saveAllRecords,
+  loadEngineRoomRecords,
+  saveEngineRoomRecords,
 } from "./types";
 
 interface ShiftContextValue {
@@ -24,6 +27,10 @@ interface ShiftContextValue {
   currentRecords: WatchRecord[];
   addRecord: (record: Omit<WatchRecord, "id" | "shiftId" | "createdAt">) => void;
   removeRecord: (id: string) => void;
+  engineRoomRecords: Record<string, EngineRoomRecord[]>;
+  currentEngineRoomRecords: EngineRoomRecord[];
+  latestEngineRoomRecord: EngineRoomRecord | null;
+  addEngineRoomRecord: (record: Omit<EngineRoomRecord, "id" | "shiftId" | "createdAt">) => void;
 }
 
 const ShiftContext = createContext<ShiftContextValue | null>(null);
@@ -31,6 +38,7 @@ const ShiftContext = createContext<ShiftContextValue | null>(null);
 export function ShiftProvider({ children }: { children: ReactNode }) {
   const [currentShiftId, setCurrentShiftIdState] = useState(loadCurrentShiftId);
   const [records, setRecords] = useState<Record<string, WatchRecord[]>>(loadAllRecords);
+  const [engineRoomRecords, setEngineRoomRecords] = useState<Record<string, EngineRoomRecord[]>>(loadEngineRoomRecords);
 
   const currentShift = SHIFTS.find((s) => s.id === currentShiftId) ?? SHIFTS[0];
 
@@ -42,6 +50,14 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const currentRecords = records[currentShiftId] ?? [];
+  const currentEngineRoomRecords = engineRoomRecords[currentShiftId] ?? [];
+
+  const allEngineRoomRecords = Object.values(engineRoomRecords).flat();
+  const latestEngineRoomRecord = allEngineRoomRecords.length > 0
+    ? allEngineRoomRecords.reduce((latest, record) =>
+        new Date(record.createdAt) > new Date(latest.createdAt) ? record : latest
+      )
+    : null;
 
   const addRecord = useCallback(
     (input: Omit<WatchRecord, "id" | "shiftId" | "createdAt">) => {
@@ -75,6 +91,26 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     [currentShiftId]
   );
 
+  const addEngineRoomRecord = useCallback(
+    (input: Omit<EngineRoomRecord, "id" | "shiftId" | "createdAt">) => {
+      const newRecord: EngineRoomRecord = {
+        ...input,
+        id: crypto.randomUUID(),
+        shiftId: currentShiftId,
+        createdAt: new Date().toISOString(),
+      };
+      setEngineRoomRecords((prev) => {
+        const updated = {
+          ...prev,
+          [currentShiftId]: [...(prev[currentShiftId] ?? []), newRecord],
+        };
+        saveEngineRoomRecords(updated);
+        return updated;
+      });
+    },
+    [currentShiftId]
+  );
+
   useEffect(() => {
     saveCurrentShiftId(currentShiftId);
   }, [currentShiftId]);
@@ -89,6 +125,10 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         currentRecords,
         addRecord,
         removeRecord,
+        engineRoomRecords,
+        currentEngineRoomRecords,
+        latestEngineRoomRecord,
+        addEngineRoomRecord,
       }}
     >
       {children}

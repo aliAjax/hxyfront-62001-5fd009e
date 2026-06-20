@@ -2,6 +2,7 @@ import "./styles.css";
 import { useState } from "react";
 import { ShiftProvider } from "./shifts/ShiftContext";
 import { ShiftSelector } from "./shifts/ShiftSelector";
+import { EngineRoomPanel } from "./shifts/EngineRoomPanel";
 import { useShift } from "./shifts/ShiftContext";
 
 const project = {
@@ -17,9 +18,18 @@ const project = {
 };
 
 function Dashboard() {
-  const { currentShift, currentRecords } = useShift();
+  const { currentShift, currentRecords, latestEngineRoomRecord } = useShift();
 
   const metricValues = project.metrics.map((_, i) => {
+    if (latestEngineRoomRecord) {
+      const keys = [
+        "mainEngineSpeed",
+        "lubricatingOilPressure",
+        "coolingWaterTemp",
+        "fuelConsumption",
+      ] as const;
+      return latestEngineRoomRecord[keys[i]];
+    }
     const values = currentRecords
       .map((r) => {
         const parts = r.params.split(/[,，、]/);
@@ -41,6 +51,11 @@ function Dashboard() {
               <span className="unit">{project.metricUnits[index]}</span>
             )}
           </strong>
+          {latestEngineRoomRecord && (
+            <small className="record-time">
+              {new Date(latestEngineRoomRecord.createdAt).toLocaleString("zh-CN")}
+            </small>
+          )}
         </article>
       ))}
     </section>
@@ -195,6 +210,8 @@ function AppContent() {
       <ShiftSelector />
 
       <Dashboard />
+
+      <EngineRoomPanel />
 
       <section className="workspace">
         <FilterAside />

@@ -33,6 +33,7 @@ export function getCurrentShiftId(): string {
 
 const STORAGE_KEY_SHIFT = "watch-current-shift";
 const STORAGE_KEY_RECORDS = "watch-records";
+const STORAGE_KEY_ENGINE_ROOM = "engine-room-records";
 
 export function loadCurrentShiftId(): string {
   try {
@@ -59,5 +60,29 @@ export function loadAllRecords(): Record<string, WatchRecord[]> {
 export function saveAllRecords(records: Record<string, WatchRecord[]>): void {
   try {
     localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(records));
+  } catch {}
+}
+
+export interface EngineRoomRecord {
+  id: string;
+  shiftId: string;
+  mainEngineSpeed: number;
+  lubricatingOilPressure: number;
+  coolingWaterTemp: number;
+  fuelConsumption: number;
+  createdAt: string;
+}
+
+export function loadEngineRoomRecords(): Record<string, EngineRoomRecord[]> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_ENGINE_ROOM);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+export function saveEngineRoomRecords(records: Record<string, EngineRoomRecord[]>): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_ENGINE_ROOM, JSON.stringify(records));
   } catch {}
 }
