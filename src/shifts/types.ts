@@ -86,3 +86,68 @@ export function saveEngineRoomRecords(records: Record<string, EngineRoomRecord[]
     localStorage.setItem(STORAGE_KEY_ENGINE_ROOM, JSON.stringify(records));
   } catch {}
 }
+
+export type AnomalyStatus = "待处理" | "处理中" | "已处理" | "需复查" | "已关闭";
+
+export interface StatusUpdate {
+  id: string;
+  status: AnomalyStatus;
+  note: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface AnomalyRecord {
+  id: string;
+  shiftId: string;
+  device: string;
+  anomalyDescription: string;
+  initialStatus: AnomalyStatus;
+  currentStatus: AnomalyStatus;
+  reviewTime: string;
+  handoverNote: string;
+  createdAt: string;
+  createdBy: string;
+  statusHistory: StatusUpdate[];
+}
+
+const STORAGE_KEY_ANOMALIES = "anomaly-inspection-records";
+
+export function loadAnomalyRecords(): Record<string, AnomalyRecord[]> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_ANOMALIES);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+export function saveAnomalyRecords(records: Record<string, AnomalyRecord[]>): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_ANOMALIES, JSON.stringify(records));
+  } catch {}
+}
+
+export const ANOMALY_STATUS_OPTIONS: AnomalyStatus[] = [
+  "待处理",
+  "处理中",
+  "已处理",
+  "需复查",
+  "已关闭",
+];
+
+export function getStatusClass(status: AnomalyStatus): string {
+  switch (status) {
+    case "待处理":
+      return "status-pending";
+    case "处理中":
+      return "status-processing";
+    case "已处理":
+      return "status-resolved";
+    case "需复查":
+      return "status-review";
+    case "已关闭":
+      return "status-closed";
+    default:
+      return "status-default";
+  }
+}

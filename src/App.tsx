@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ShiftProvider } from "./shifts/ShiftContext";
 import { ShiftSelector } from "./shifts/ShiftSelector";
 import { EngineRoomPanel } from "./shifts/EngineRoomPanel";
+import { AnomalyTimeline } from "./shifts/AnomalyTimeline";
 import { useShift } from "./shifts/ShiftContext";
 
 import { DeviceHistoryPage } from "./shifts/DeviceHistoryPage";
@@ -229,6 +230,8 @@ function AppContent() {
         <NavAside onNavigate={setPage} />
         <RecordForm />
       </section>
+
+      <AnomalyTimeline />
 
       <HistoryRecords />
     </main>
