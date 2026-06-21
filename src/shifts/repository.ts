@@ -9,11 +9,16 @@ import {
   type ImportStrategy,
   type StatusUpdate,
   type Shift,
+  type RiskAssessment,
   SHIFTS,
   SCHEMA_VERSION,
   EXPORT_VERSION,
   generateIdempotencyKey,
   getCurrentShiftId as getDefaultCurrentShiftId,
+  loadRiskAssessments,
+  saveRiskAssessments,
+  calculateRiskAssessment,
+  type RiskCalculationInput,
 } from "./domain";
 
 const STORAGE_KEYS = {
@@ -24,6 +29,7 @@ const STORAGE_KEYS = {
   ANOMALIES: "anomaly-inspection-records",
   BILGE: "bilge-water-records",
   HANDOVER: "handover-summaries",
+  RISK: "risk-assessments",
 } as const;
 
 type RepositoryEvent =
@@ -32,6 +38,7 @@ type RepositoryEvent =
   | "anomalies:changed"
   | "bilge:changed"
   | "handover:changed"
+  | "risk:changed"
   | "shift:changed";
 
 type EventHandler = () => void;
@@ -43,6 +50,7 @@ interface WatchRepositoryState {
   anomalyRecords: Record<string, AnomalyRecord[]>;
   bilgeWaterRecords: Record<string, BilgeWaterRecord[]>;
   handoverSummaries: Record<string, HandoverSummary>;
+  riskAssessments: Record<string, RiskAssessment[]>;
 }
 
 class EventEmitter {
@@ -73,6 +81,7 @@ class WatchRepository {
   private anomalyRecords: Record<string, AnomalyRecord[]> = {};
   private bilgeWaterRecords: Record<string, BilgeWaterRecord[]> = {};
   private handoverSummaries: Record<string, HandoverSummary> = {};
+  private riskAssessments: Record<string, RiskAssessment[]> = {};
 
   constructor() {
     this.loadAll();
@@ -87,6 +96,7 @@ class WatchRepository {
       anomalyRecords: JSON.parse(JSON.stringify(this.anomalyRecords)),
       bilgeWaterRecords: JSON.parse(JSON.stringify(this.bilgeWaterRecords)),
       handoverSummaries: JSON.parse(JSON.stringify(this.handoverSummaries)),
+      riskAssessments: JSON.parse(JSON.stringify(this.riskAssessments)),
     };
   }
 
@@ -97,6 +107,7 @@ class WatchRepository {
     this.anomalyRecords = this.safeLoad<Record<string, AnomalyRecord[]>>(STORAGE_KEYS.ANOMALIES, {});
     this.bilgeWaterRecords = this.safeLoad<Record<string, BilgeWaterRecord[]>>(STORAGE_KEYS.BILGE, {});
     this.handoverSummaries = this.safeLoad<Record<string, HandoverSummary>>(STORAGE_KEYS.HANDOVER, {});
+    this.riskAssessments = this.safeLoadWithMigration<Record<string, RiskAssessment[]>>(STORAGE_KEYS.RISK, {});
   }
 
   saveAll(): void {
@@ -105,6 +116,7 @@ class WatchRepository {
     this.safeSave(STORAGE_KEYS.ANOMALIES, this.anomalyRecords);
     this.safeSave(STORAGE_KEYS.BILGE, this.bilgeWaterRecords);
     this.safeSave(STORAGE_KEYS.HANDOVER, this.handoverSummaries);
+    this.safeSave(STORAGE_KEYS.RISK, this.riskAssessments);
     this.safeSave(STORAGE_KEYS.CURRENT_SHIFT, this.currentShiftId);
     this.safeSave(STORAGE_KEYS.SCHEMA_VERSION, SCHEMA_VERSION);
   }
@@ -652,6 +664,7 @@ class WatchRepository {
       anomalyRecords: JSON.parse(JSON.stringify(this.anomalyRecords)),
       bilgeWaterRecords: JSON.parse(JSON.stringify(this.bilgeWaterRecords)),
       handoverSummaries: JSON.parse(JSON.stringify(this.handoverSummaries)),
+      riskAssessments: JSON.parse(JSON.stringify(this.riskAssessments)),
       meta: {
         schemaVersion: SCHEMA_VERSION,
         migratedAt: new Date().toISOString(),
@@ -713,6 +726,9 @@ class WatchRepository {
     this.anomalyRecords = mergeArrayMap(exportData.anomalyRecords, this.anomalyRecords);
     this.bilgeWaterRecords = mergeArrayMap(exportData.bilgeWaterRecords, this.bilgeWaterRecords);
     this.handoverSummaries = mergeObjectMap(exportData.handoverSummaries, this.handoverSummaries);
+    if (exportData.riskAssessments) {
+      this.riskAssessments = mergeArrayMap(exportData.riskAssessments as Record<string, RiskAssessment[]>, this.riskAssessments);
+    }
 
     this.saveAll();
     this.emitter.emit("records:changed");
@@ -720,13 +736,121 @@ class WatchRepository {
     this.emitter.emit("anomalies:changed");
     this.emitter.emit("bilge:changed");
     this.emitter.emit("handover:changed");
+    this.emitter.emit("risk:changed");
 
     return { imported, conflicts };
+  }
+
+  listRiskAssessments(shiftId?: string): RiskAssessment[] {
+    const targetShift = shiftId ?? this.currentShiftId;
+    return (this.riskAssessments[targetShift] ?? []).filter((r) => !r.deletedAt);
+  }
+
+  getLatestRiskAssessment(shiftId?: string): RiskAssessment | null {
+    const list = this.listRiskAssessments(shiftId);
+    if (list.length === 0) return null;
+    return list.reduce((latest, r) =>
+      new Date(r.calculatedAt) > new Date(latest.calculatedAt) ? r : latest
+    );
+  }
+
+  getAllRiskAssessments(): RiskAssessment[] {
+    return Object.values(this.riskAssessments)
+      .flat()
+      .filter((r) => !r.deletedAt);
+  }
+
+  addRiskAssessment(
+    input: Omit<RiskAssessment, "id" | "vesselId" | "fleetId" | "deletedAt" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy"> & {
+      shiftId: string;
+    }
+  ): RiskAssessment {
+    const now = new Date().toISOString();
+    const assessment: RiskAssessment = {
+      ...input,
+      id: crypto.randomUUID(),
+      vesselId: null,
+      fleetId: null,
+      createdAt: now,
+      createdBy: "system",
+      updatedAt: now,
+      updatedBy: "system",
+      deletedAt: null,
+    };
+    if (!this.riskAssessments[input.shiftId]) {
+      this.riskAssessments[input.shiftId] = [];
+    }
+    this.riskAssessments[input.shiftId].push(assessment);
+    this.safeSave(STORAGE_KEYS.RISK, this.riskAssessments);
+    this.emitter.emit("risk:changed");
+    return assessment;
+  }
+
+  deleteRiskAssessment(id: string, deletedBy: string): void {
+    const now = new Date().toISOString();
+    for (const shiftId of Object.keys(this.riskAssessments)) {
+      const idx = this.riskAssessments[shiftId].findIndex((r) => r.id === id && !r.deletedAt);
+      if (idx !== -1) {
+        this.riskAssessments[shiftId][idx] = {
+          ...this.riskAssessments[shiftId][idx],
+          deletedAt: now,
+        };
+        this.safeSave(STORAGE_KEYS.RISK, this.riskAssessments);
+        this.emitter.emit("risk:changed");
+        return;
+      }
+    }
+  }
+
+  calculateAndSaveRiskAssessment(shiftId?: string): RiskAssessment {
+    const targetShift = shiftId ?? this.currentShiftId;
+    const shiftEngineRecords = (this.engineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+    const shiftBilgeRecords = (this.bilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+    const shiftAnomalyRecords = (this.anomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+
+    const latestEngine = shiftEngineRecords.length > 0
+      ? shiftEngineRecords.reduce((a, b) => (new Date(a.createdAt) > new Date(b.createdAt) ? a : b))
+      : null;
+    const latestBilge = shiftBilgeRecords.length > 0
+      ? shiftBilgeRecords.reduce((a, b) => (new Date(a.createdAt) > new Date(b.createdAt) ? a : b))
+      : null;
+
+    const calcInput: RiskCalculationInput = {
+      shiftId: targetShift,
+      engineRoomRecord: latestEngine,
+      bilgeWaterRecord: latestBilge,
+      anomalyRecords: shiftAnomalyRecords,
+      engineRoomRecords: shiftEngineRecords,
+      bilgeWaterRecords: shiftBilgeRecords,
+    };
+
+    const calculated = calculateRiskAssessment(calcInput);
+    return this.addRiskAssessment({ ...calculated, shiftId: targetShift });
   }
 
   checkAndMigrate(): void {
     const storedVersion = this.safeLoad<string>(STORAGE_KEYS.SCHEMA_VERSION, "");
     if (!storedVersion || storedVersion !== SCHEMA_VERSION) {
+      try {
+        const raw = this.safeLoad<Record<string, RiskAssessment[]>>(STORAGE_KEYS.RISK, {});
+        if (raw && typeof raw === "object") {
+          for (const shiftId of Object.keys(raw)) {
+            const list = raw[shiftId];
+            if (Array.isArray(list)) {
+              this.riskAssessments[shiftId] = list.map((r) => ({
+                ...r,
+                schemaVersion: r.schemaVersion || SCHEMA_VERSION,
+                deletedAt: r.deletedAt || null,
+                vesselId: r.vesselId || null,
+                fleetId: r.fleetId || null,
+                triggers: Array.isArray(r.triggers) ? r.triggers : [],
+                timeline: Array.isArray(r.timeline) ? r.timeline : [],
+                dataSnapshot: r.dataSnapshot || { anomalyIds: [] },
+              }));
+            }
+          }
+        }
+      } catch {}
       this.safeSave(STORAGE_KEYS.SCHEMA_VERSION, SCHEMA_VERSION);
     }
   }
@@ -743,6 +867,38 @@ class WatchRepository {
     try {
       const raw = localStorage.getItem(key);
       if (raw) return JSON.parse(raw) as T;
+    } catch {}
+    return defaultValue;
+  }
+
+  private safeLoadWithMigration<T>(key: string, defaultValue: T): T {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw) as T;
+        if (key === STORAGE_KEYS.RISK) {
+          const obj = parsed as Record<string, RiskAssessment[]>;
+          if (obj && typeof obj === "object") {
+            for (const shiftId of Object.keys(obj)) {
+              const list = obj[shiftId];
+              if (Array.isArray(list)) {
+                obj[shiftId] = list.map((r) => ({
+                  ...r,
+                  schemaVersion: r.schemaVersion || SCHEMA_VERSION,
+                  deletedAt: r.deletedAt || null,
+                  vesselId: r.vesselId || null,
+                  fleetId: r.fleetId || null,
+                  triggers: Array.isArray(r.triggers) ? r.triggers : [],
+                  timeline: Array.isArray(r.timeline) ? r.timeline : [],
+                  dataSnapshot: r.dataSnapshot || { anomalyIds: [] },
+                }));
+              }
+            }
+          }
+          return obj as T;
+        }
+        return parsed;
+      }
     } catch {}
     return defaultValue;
   }

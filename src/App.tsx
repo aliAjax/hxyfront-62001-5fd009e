@@ -9,6 +9,7 @@ import { ShiftHandover } from "./shifts/ShiftHandover";
 import { BilgeWaterPanel } from "./shifts/BilgeWaterPanel";
 import { DataManager } from "./shifts/DataManager";
 import { MaintenanceReminder } from "./shifts/MaintenanceReminder";
+import { RiskAssessmentPanel } from "./shifts/RiskAssessmentPanel";
 import { getBilgeLevelStatus, isBilgeTreatmentUnfinished } from "./shifts/types";
 import type { WatchRecord } from "./shifts/types";
 
@@ -366,24 +367,34 @@ function AppContent() {
 
       <Dashboard />
 
+      <RiskAssessmentPanel />
+
       <MaintenanceReminder onNavigateToHistory={navigateToHistoryWithCategory} />
 
-      <EngineRoomPanel />
+      <div id="engine-room-section">
+        <EngineRoomPanel />
+      </div>
 
-      <BilgeWaterPanel />
+      <div id="bilge-water-section">
+        <BilgeWaterPanel />
+      </div>
 
       <section className="workspace">
         <NavAside onNavigate={setPage} />
         <RecordForm editingRecord={editingRecord} setEditingRecord={setEditingRecord} />
       </section>
 
-      <AnomalyTimeline />
+      <div id="anomaly-timeline-section">
+        <AnomalyTimeline />
+      </div>
 
       <ShiftHandover />
 
       <DataManager />
 
-      <HistoryRecords setEditingRecord={setEditingRecord} />
+      <div id="history-records-section">
+        <HistoryRecords setEditingRecord={setEditingRecord} />
+      </div>
     </main>
   );
 }

@@ -18,12 +18,21 @@ import {
   type HandoverSummary,
   type ExportData,
   type ImportStrategy,
+  type RiskAssessment,
+  type RiskLevel,
+  type RiskTrigger,
+  type RiskTimelineEvent,
   SHIFTS,
   getPreviousShiftId,
   generateIdempotencyKey,
   computeDataHash,
   downloadExportFile,
   isBilgeTreatmentUnfinished,
+  calculateRiskAssessment,
+  type RiskCalculationInput,
+  RISK_LEVEL_LABELS,
+  RISK_LEVEL_SCORES,
+  RISK_LEVEL_ORDER,
 } from "./domain";
 import { getRepository } from "./repository";
 
@@ -68,6 +77,15 @@ interface ShiftContextValue {
   generateAutoSummary: (shiftId?: string) => string;
   isDataDirty: (shiftId?: string) => boolean;
   lastSubmissionKey: string | null;
+  riskAssessments: Record<string, RiskAssessment[]>;
+  currentRiskAssessments: RiskAssessment[];
+  latestRiskAssessment: RiskAssessment | null;
+  allRiskAssessments: RiskAssessment[];
+  calculateRisk: (shiftId?: string) => RiskAssessment;
+  computeRiskOnTheFly: (shiftId?: string) => RiskAssessment | null;
+  riskLevelLabels: Record<RiskLevel, string>;
+  riskLevelScores: Record<RiskLevel, number>;
+  riskLevelOrder: RiskLevel[];
 }
 
 const ShiftContext = createContext<ShiftContextValue | null>(null);
@@ -82,6 +100,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   const [anomalyRecords, setAnomalyRecords] = useState(initialState.anomalyRecords);
   const [bilgeWaterRecords, setBilgeWaterRecords] = useState(initialState.bilgeWaterRecords);
   const [handoverSummaries, setHandoverSummaries] = useState(initialState.handoverSummaries);
+  const [riskAssessments, setRiskAssessments] = useState(initialState.riskAssessments);
   const [lastSubmissionKey, setLastSubmissionKey] = useState<string | null>(null);
 
   const prevShiftIdRef = useRef(currentShiftId);
@@ -94,6 +113,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     setAnomalyRecords(state.anomalyRecords);
     setBilgeWaterRecords(state.bilgeWaterRecords);
     setHandoverSummaries(state.handoverSummaries);
+    setRiskAssessments(state.riskAssessments);
   }, [repository]);
 
   useEffect(() => {
@@ -103,6 +123,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
       repository.on("anomalies:changed", refreshState),
       repository.on("bilge:changed", refreshState),
       repository.on("handover:changed", refreshState),
+      repository.on("risk:changed", refreshState),
       repository.on("shift:changed", refreshState),
     ];
     return () => {
@@ -442,6 +463,77 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     }
   }, [currentShiftId, anomalyRecords]);
 
+  const currentRiskAssessments = useMemo(
+    () => (riskAssessments[currentShiftId] ?? []).filter((r) => !r.deletedAt),
+    [riskAssessments, currentShiftId]
+  );
+
+  const allRiskAssessments = useMemo(
+    () => Object.values(riskAssessments).flat().filter((r) => !r.deletedAt),
+    [riskAssessments]
+  );
+
+  const latestRiskAssessment = useMemo(() => {
+    if (currentRiskAssessments.length === 0) return null;
+    return currentRiskAssessments.reduce((latest, r) =>
+      new Date(r.calculatedAt) > new Date(latest.calculatedAt) ? r : latest
+    );
+  }, [currentRiskAssessments]);
+
+  const calculateRisk = useCallback(
+    (shiftId?: string): RiskAssessment => {
+      return repository.calculateAndSaveRiskAssessment(shiftId ?? currentShiftId);
+    },
+    [repository, currentShiftId]
+  );
+
+  const computeRiskOnTheFly = useCallback(
+    (shiftId?: string): RiskAssessment | null => {
+      const targetShift = shiftId ?? currentShiftId;
+      const shiftEngineRecords = (engineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftBilgeRecords = (bilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftAnomalyRecords = (anomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+
+      if (
+        shiftEngineRecords.length === 0 &&
+        shiftBilgeRecords.length === 0 &&
+        shiftAnomalyRecords.length === 0
+      ) {
+        return null;
+      }
+
+      const latestEngine = shiftEngineRecords.length > 0
+        ? shiftEngineRecords.reduce((a, b) => (new Date(a.createdAt) > new Date(b.createdAt) ? a : b))
+        : null;
+      const latestBilge = shiftBilgeRecords.length > 0
+        ? shiftBilgeRecords.reduce((a, b) => (new Date(a.createdAt) > new Date(b.createdAt) ? a : b))
+        : null;
+
+      const calcInput: RiskCalculationInput = {
+        shiftId: targetShift,
+        engineRoomRecord: latestEngine,
+        bilgeWaterRecord: latestBilge,
+        anomalyRecords: shiftAnomalyRecords,
+        engineRoomRecords: shiftEngineRecords,
+        bilgeWaterRecords: shiftBilgeRecords,
+      };
+
+      const calculated = calculateRiskAssessment(calcInput);
+      return {
+        ...calculated,
+        id: "on-the-fly",
+        vesselId: null,
+        fleetId: null,
+        createdAt: new Date().toISOString(),
+        createdBy: "on-the-fly",
+        updatedAt: new Date().toISOString(),
+        updatedBy: "on-the-fly",
+        deletedAt: null,
+      } as RiskAssessment;
+    },
+    [currentShiftId, engineRoomRecords, bilgeWaterRecords, anomalyRecords]
+  );
+
   return (
     <ShiftContext.Provider
       value={{
@@ -485,6 +577,15 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         generateAutoSummary,
         isDataDirty,
         lastSubmissionKey,
+        riskAssessments,
+        currentRiskAssessments,
+        latestRiskAssessment,
+        allRiskAssessments,
+        calculateRisk,
+        computeRiskOnTheFly,
+        riskLevelLabels: RISK_LEVEL_LABELS,
+        riskLevelScores: RISK_LEVEL_SCORES,
+        riskLevelOrder: RISK_LEVEL_ORDER,
       }}
     >
       {children}
