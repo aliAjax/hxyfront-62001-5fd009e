@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useShift } from "./ShiftContext";
 import type { WatchRecord } from "./types";
-import { SHIFTS } from "./types";
+import type { BilgeWaterRecord } from "./types";
+import {
+  SHIFTS,
+  getBilgeLevelStatus,
+  isBilgeTreatmentUnfinished,
+} from "./types";
 
 type DeviceCategory = "主机" | "发电机" | "泵组" | "舱底水";
 
@@ -25,7 +30,7 @@ function getShiftLabel(shiftId: string): string {
 }
 
 export function DeviceHistoryPage({ onBack }: { onBack: () => void }) {
-  const { records } = useShift();
+  const { records, allBilgeWaterRecords } = useShift();
   const [activeCategory, setActiveCategory] = useState<DeviceCategory>("主机");
 
   const allRecords: WatchRecord[] = Object.values(records)
@@ -33,6 +38,15 @@ export function DeviceHistoryPage({ onBack }: { onBack: () => void }) {
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const filtered = allRecords.filter((r) => matchCategory(r.device, activeCategory));
+
+  const sortedBilgeRecords: BilgeWaterRecord[] = useMemo(() =>
+    [...allBilgeWaterRecords].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    ), [allBilgeWaterRecords]);
+
+  const alertBilgeCount = sortedBilgeRecords.filter(
+    (r) => getBilgeLevelStatus(r.liquidLevel) !== "normal" || isBilgeTreatmentUnfinished(r.treatmentResult)
+  ).length;
 
   return (
     <main className="app">
@@ -52,6 +66,9 @@ export function DeviceHistoryPage({ onBack }: { onBack: () => void }) {
             onClick={() => setActiveCategory(cat)}
           >
             {cat}
+            {cat === "舱底水" && alertBilgeCount > 0 && (
+              <span className="tab-alert-badge">{alertBilgeCount}</span>
+            )}
           </button>
         ))}
         <button className="back-btn" onClick={onBack}>
@@ -59,60 +76,162 @@ export function DeviceHistoryPage({ onBack }: { onBack: () => void }) {
         </button>
       </div>
 
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>{activeCategory} · 设备记录</p>
-            <h2>{activeCategory}历史记录</h2>
+      {activeCategory === "舱底水" ? (
+        <section className="panel bilge-history-panel">
+          <div className="heading">
+            <div>
+              <p>舱底水 · 监控记录</p>
+              <h2>舱底水历史记录</h2>
+            </div>
+            <div className="history-stats-row">
+              <span className="record-count">共 {sortedBilgeRecords.length} 条</span>
+              {alertBilgeCount > 0 && (
+                <span className="bilge-alert-count">
+                  <span className="alert-dot-blink" />
+                  {alertBilgeCount} 条需关注
+                </span>
+              )}
+            </div>
           </div>
-          <span className="record-count">共 {filtered.length} 条</span>
-        </div>
 
-        {filtered.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">📋</div>
-            <p>暂无{activeCategory}相关记录</p>
-            <span>当前筛选条件下没有匹配的设备记录</span>
-          </div>
-        ) : (
-          <div className="history-table-wrap">
-            <table className="history-table">
-              <thead>
-                <tr>
-                  <th>班次</th>
-                  <th>设备名称</th>
-                  <th>参数读数</th>
-                  <th>异常描述</th>
-                  <th>处理状态</th>
-                  <th>时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((record) => (
-                  <tr key={record.id}>
-                    <td>
-                      <span className="shift-badge">{getShiftLabel(record.shiftId)}</span>
-                    </td>
-                    <td className="device-name">{record.device}</td>
-                    <td>{record.params || "--"}</td>
-                    <td className={record.anomaly ? "anomaly-text" : ""}>
-                      {record.anomaly || "--"}
-                    </td>
-                    <td>
-                      <span className={`status-tag status-${statusClass(record.status)}`}>
-                        {record.status || "--"}
-                      </span>
-                    </td>
-                    <td className="time-cell">
-                      {new Date(record.createdAt).toLocaleString("zh-CN")}
-                    </td>
+          {sortedBilgeRecords.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-icon">💧</div>
+              <p>暂无舱底水相关记录</p>
+              <span>返回首页录入舱底水状态记录</span>
+            </div>
+          ) : (
+            <div className="history-table-wrap">
+              <table className="history-table bilge-history-table">
+                <thead>
+                  <tr>
+                    <th>班次</th>
+                    <th>液位</th>
+                    <th>泵状态</th>
+                    <th>运行时长</th>
+                    <th>处理结果</th>
+                    <th>警戒线备注</th>
+                    <th>状态</th>
+                    <th>时间</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {sortedBilgeRecords.map((record) => {
+                    const levelStatus = getBilgeLevelStatus(record.liquidLevel);
+                    const treatmentUnfinished = isBilgeTreatmentUnfinished(record.treatmentResult);
+                    const isAlert = levelStatus !== "normal" || treatmentUnfinished;
+                    return (
+                      <tr
+                        key={record.id}
+                        className={isAlert ? "bilge-alert-row" : ""}
+                      >
+                        <td>
+                          <span className="shift-badge">{getShiftLabel(record.shiftId)}</span>
+                        </td>
+                        <td>
+                          <div className="bilge-level-cell">
+                            <span className={`bilge-level-value level-${levelStatus}`}>
+                              {record.liquidLevel}%
+                            </span>
+                            {levelStatus !== "normal" && (
+                              <span className={`bilge-level-tag level-tag-${levelStatus}`}>
+                              {levelStatus === "danger" ? "危险" : "警戒"}
+                            </span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`pump-cell pump-${record.pumpStatus}`}>
+                            <span className="pump-dot" />
+                            {record.pumpStatus}
+                          </span>
+                        </td>
+                        <td>{record.pumpRunDuration} min</td>
+                        <td>
+                          <span className={`status-tag ${treatmentUnfinished ? "status-processing" : "status-normal"}`}>
+                            {record.treatmentResult}
+                          </span>
+                        </td>
+                        <td className={record.warningNote ? "warning-note-cell" : ""}>
+                          {record.warningNote || "--"}
+                        </td>
+                        <td>
+                          {isAlert ? (
+                            <span className="bilge-status-alert">
+                              <span className="alert-icon-small" />
+                              需关注
+                            </span>
+                          ) : (
+                            <span className="bilge-status-ok">正常</span>
+                          )}
+                        </td>
+                        <td className="time-cell">
+                          {new Date(record.createdAt).toLocaleString("zh-CN")}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : (
+        <section className="panel">
+          <div className="heading">
+            <div>
+              <p>{activeCategory} · 设备记录</p>
+              <h2>{activeCategory}历史记录</h2>
+            </div>
+            <span className="record-count">共 {filtered.length} 条</span>
           </div>
-        )}
-      </section>
+
+          {filtered.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-icon">📋</div>
+              <p>暂无{activeCategory}相关记录</p>
+              <span>当前筛选条件下没有匹配的设备记录</span>
+            </div>
+          ) : (
+            <div className="history-table-wrap">
+              <table className="history-table">
+                <thead>
+                  <tr>
+                    <th>班次</th>
+                    <th>设备名称</th>
+                    <th>参数读数</th>
+                    <th>异常描述</th>
+                    <th>处理状态</th>
+                    <th>时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((record) => (
+                    <tr key={record.id}>
+                      <td>
+                        <span className="shift-badge">{getShiftLabel(record.shiftId)}</span>
+                      </td>
+                      <td className="device-name">{record.device}</td>
+                      <td>{record.params || "--"}</td>
+                      <td className={record.anomaly ? "anomaly-text" : ""}>
+                        {record.anomaly || "--"}
+                      </td>
+                      <td>
+                        <span className={`status-tag status-${statusClass(record.status)}`}>
+                          {record.status || "--"}
+                        </span>
+                      </td>
+                      <td className="time-cell">
+                        {new Date(record.createdAt).toLocaleString("zh-CN")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
     </main>
   );
 }

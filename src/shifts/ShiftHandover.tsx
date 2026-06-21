@@ -10,6 +10,7 @@ export function ShiftHandover() {
     saveHandover,
     engineRoomRecords,
     anomalyRecords,
+    bilgeWaterRecords,
     records,
   } = useShift();
 
@@ -44,6 +45,25 @@ export function ShiftHandover() {
       );
     }
 
+    const shiftBilgeRecords = bilgeWaterRecords[shiftId] ?? [];
+    if (shiftBilgeRecords.length > 0) {
+      const latest = shiftBilgeRecords[shiftBilgeRecords.length - 1];
+      const levelTag = latest.liquidLevel >= 90 ? "⚠危险" : latest.liquidLevel >= 80 ? "⚠警戒" : "正常";
+      parts.push(
+        `【舱底水状态】液位 ${latest.liquidLevel}%（${levelTag}），泵状态：${latest.pumpStatus}，运行时长：${latest.pumpRunDuration} min，处理结果：${latest.treatmentResult}` +
+        (latest.warningNote ? `，备注：${latest.warningNote}` : "")
+      );
+      const unfinishedBilge = shiftBilgeRecords.filter(
+        (r) => r.treatmentResult === "未处理" || r.treatmentResult === "处理中" || r.treatmentResult === "待分离" || r.treatmentResult === "异常" || r.liquidLevel >= 80
+      );
+      if (unfinishedBilge.length > 0) {
+        const bilgeItems = unfinishedBilge.map(
+          (r, i) => `${i + 1}. 液位 ${r.liquidLevel}%，泵${r.pumpStatus}，处理${r.treatmentResult}${r.warningNote ? "：" + r.warningNote : ""}`
+        );
+        parts.push(`【舱底水·需关注】\n${bilgeItems.join("\n")}`);
+      }
+    }
+
     const shiftAnomalies = (anomalyRecords[shiftId] ?? []).filter(
       (r) => r.currentStatus !== "已关闭"
     );
@@ -69,7 +89,7 @@ export function ShiftHandover() {
     }
 
     return parts.join("\n\n");
-  }, [currentShift.id, engineRoomRecords, anomalyRecords, records]);
+  }, [currentShift.id, engineRoomRecords, bilgeWaterRecords, anomalyRecords, records]);
 
   const handleSaveDraft = () => {
     saveHandover(manualNote, true);

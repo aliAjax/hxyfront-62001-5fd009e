@@ -6,6 +6,8 @@ import { EngineRoomPanel } from "./shifts/EngineRoomPanel";
 import { AnomalyTimeline } from "./shifts/AnomalyTimeline";
 import { useShift } from "./shifts/ShiftContext";
 import { ShiftHandover } from "./shifts/ShiftHandover";
+import { BilgeWaterPanel } from "./shifts/BilgeWaterPanel";
+import { getBilgeLevelStatus, isBilgeTreatmentUnfinished } from "./shifts/types";
 
 import { DeviceHistoryPage } from "./shifts/DeviceHistoryPage";
 
@@ -17,17 +19,20 @@ const project = {
   title: "船舶轮机值班记录",
   domain: "船舶轮机",
   palette: ["#0f766e", "#2563eb", "#f97316"],
-  metrics: ["主机转速", "滑油压力", "冷却水温", "燃油消耗"],
-  metricUnits: ["rpm", "MPa", "℃", "L/h"],
+  metrics: ["主机转速", "滑油压力", "冷却水温", "燃油消耗", "舱底水液位"],
+  metricUnits: ["rpm", "MPa", "℃", "L/h", "%"],
   filters: ["主机", "发电机", "泵组", "舱底水"],
   fields: ["设备名称", "参数读数", "异常描述", "处理状态", "交接备注"],
 };
 
 function Dashboard() {
-  const { currentShift, currentRecords, latestEngineRoomRecord } = useShift();
+  const { currentShift, currentRecords, latestEngineRoomRecord, latestBilgeWaterRecord } = useShift();
 
-  const metricValues = project.metrics.map((_, i) => {
-    if (latestEngineRoomRecord) {
+  const metricValues = project.metrics.map((metric, i) => {
+    if (metric === "舱底水液位") {
+      return latestBilgeWaterRecord ? latestBilgeWaterRecord.liquidLevel : "--";
+    }
+    if (latestEngineRoomRecord && i < 4) {
       const keys = [
         "mainEngineSpeed",
         "lubricatingOilPressure",
@@ -36,34 +41,61 @@ function Dashboard() {
       ] as const;
       return latestEngineRoomRecord[keys[i]];
     }
-    const values = currentRecords
-      .map((r) => {
-        const parts = r.params.split(/[,，、]/);
-        const val = parseFloat(parts[i]?.replace(/[^\d.]/g, "") ?? "");
-        return isNaN(val) ? null : val;
-      })
-      .filter((v): v is number => v !== null);
-    return values.length > 0 ? values[values.length - 1] : "--";
+    if (i < 4) {
+      const values = currentRecords
+        .map((r) => {
+          const parts = r.params.split(/[,，、]/);
+          const val = parseFloat(parts[i]?.replace(/[^\d.]/g, "") ?? "");
+          return isNaN(val) ? null : val;
+        })
+        .filter((v): v is number => v !== null);
+      return values.length > 0 ? values[values.length - 1] : "--";
+    }
+    return "--";
   });
+
+  const bilgeAlert = (() => {
+    if (!latestBilgeWaterRecord) return null;
+    const levelStatus = getBilgeLevelStatus(latestBilgeWaterRecord.liquidLevel);
+    const treatmentUnfinished = isBilgeTreatmentUnfinished(latestBilgeWaterRecord.treatmentResult);
+    if (levelStatus !== "normal" || treatmentUnfinished) {
+      return { levelStatus, treatmentUnfinished, record: latestBilgeWaterRecord };
+    }
+    return null;
+  })();
 
   return (
     <section className="metrics">
-      {project.metrics.map((metric, index) => (
-        <article key={metric}>
-          <small>{metric}</small>
-          <strong>
-            {metricValues[index]}
-            {metricValues[index] !== "--" && (
-              <span className="unit">{project.metricUnits[index]}</span>
-            )}
-          </strong>
-          {latestEngineRoomRecord && (
-            <small className="record-time">
-              {new Date(latestEngineRoomRecord.createdAt).toLocaleString("zh-CN")}
+      {project.metrics.map((metric, index) => {
+        const isBilge = metric === "舱底水液位";
+        const bilgeClass = isBilge && bilgeAlert
+          ? `metric-alert metric-alert-${bilgeAlert.levelStatus}`
+          : "";
+        return (
+          <article key={metric} className={bilgeClass}>
+            <small>
+              {metric}
+              {isBilge && bilgeAlert && <span className="metric-alert-dot" />}
             </small>
-          )}
-        </article>
-      ))}
+            <strong className={isBilge && bilgeAlert ? `level-text level-${bilgeAlert.levelStatus}` : ""}>
+              {metricValues[index]}
+              {metricValues[index] !== "--" && (
+                <span className="unit">{project.metricUnits[index]}</span>
+              )}
+            </strong>
+            {isBilge && latestBilgeWaterRecord ? (
+              <small className="record-time">
+                {new Date(latestBilgeWaterRecord.createdAt).toLocaleString("zh-CN")}
+                {bilgeAlert && <span className="metric-alert-note"> · 需关注</span>}
+              </small>
+            ) : latestEngineRoomRecord ? (
+              <small className="record-time">
+                {new Date(latestEngineRoomRecord.createdAt).toLocaleString("zh-CN")}
+              </small>
+            ) : null}
+          </article>
+        );
+      })}
     </section>
   );
 }
@@ -226,6 +258,8 @@ function AppContent() {
       <Dashboard />
 
       <EngineRoomPanel />
+
+      <BilgeWaterPanel />
 
       <section className="workspace">
         <NavAside onNavigate={setPage} />

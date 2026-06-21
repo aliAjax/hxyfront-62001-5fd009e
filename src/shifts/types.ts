@@ -184,3 +184,49 @@ export function getStatusClass(status: AnomalyStatus): string {
       return "status-default";
   }
 }
+
+export type BilgePumpStatus = "未运行" | "运行中" | "故障";
+export type BilgeTreatmentResult = "未处理" | "处理中" | "达标排放" | "待分离" | "异常";
+
+export interface BilgeWaterRecord {
+  id: string;
+  shiftId: string;
+  liquidLevel: number;
+  pumpStatus: BilgePumpStatus;
+  pumpRunDuration: number;
+  treatmentResult: BilgeTreatmentResult;
+  warningNote: string;
+  createdAt: string;
+}
+
+export const BILGE_WARNING_LEVEL = 80;
+export const BILGE_DANGER_LEVEL = 90;
+
+export const BILGE_PUMP_STATUS_OPTIONS: BilgePumpStatus[] = ["未运行", "运行中", "故障"];
+export const BILGE_TREATMENT_OPTIONS: BilgeTreatmentResult[] = ["未处理", "处理中", "达标排放", "待分离", "异常"];
+
+const STORAGE_KEY_BILGE = "bilge-water-records";
+
+export function loadBilgeWaterRecords(): Record<string, BilgeWaterRecord[]> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_BILGE);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+export function saveBilgeWaterRecords(records: Record<string, BilgeWaterRecord[]>): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_BILGE, JSON.stringify(records));
+  } catch {}
+}
+
+export function getBilgeLevelStatus(level: number): "normal" | "warning" | "danger" {
+  if (level >= BILGE_DANGER_LEVEL) return "danger";
+  if (level >= BILGE_WARNING_LEVEL) return "warning";
+  return "normal";
+}
+
+export function isBilgeTreatmentUnfinished(result: BilgeTreatmentResult): boolean {
+  return result === "未处理" || result === "处理中" || result === "待分离" || result === "异常";
+}

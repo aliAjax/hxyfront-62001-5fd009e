@@ -14,6 +14,7 @@ import {
   type AnomalyStatus,
   type StatusUpdate,
   type HandoverSummary,
+  type BilgeWaterRecord,
   SHIFTS,
   loadCurrentShiftId,
   saveCurrentShiftId,
@@ -26,6 +27,8 @@ import {
   loadHandoverSummaries,
   saveHandoverSummaries,
   getPreviousShiftId,
+  loadBilgeWaterRecords,
+  saveBilgeWaterRecords,
 } from "./types";
 
 interface ShiftContextValue {
@@ -44,6 +47,11 @@ interface ShiftContextValue {
   allAnomalyRecords: AnomalyRecord[];
   addAnomalyRecord: (record: Omit<AnomalyRecord, "id" | "shiftId" | "createdAt" | "initialStatus" | "currentStatus" | "statusHistory" | "createdBy"> & { status: AnomalyStatus }) => void;
   updateAnomalyStatus: (recordId: string, newStatus: AnomalyStatus, note: string, operator: string) => void;
+  bilgeWaterRecords: Record<string, BilgeWaterRecord[]>;
+  currentBilgeWaterRecords: BilgeWaterRecord[];
+  latestBilgeWaterRecord: BilgeWaterRecord | null;
+  allBilgeWaterRecords: BilgeWaterRecord[];
+  addBilgeWaterRecord: (record: Omit<BilgeWaterRecord, "id" | "shiftId" | "createdAt">) => void;
   handoverSummaries: Record<string, HandoverSummary>;
   currentHandoverSummary: HandoverSummary | null;
   previousShiftSummary: HandoverSummary | null;
@@ -57,6 +65,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   const [records, setRecords] = useState<Record<string, WatchRecord[]>>(loadAllRecords);
   const [engineRoomRecords, setEngineRoomRecords] = useState<Record<string, EngineRoomRecord[]>>(loadEngineRoomRecords);
   const [anomalyRecords, setAnomalyRecords] = useState<Record<string, AnomalyRecord[]>>(loadAnomalyRecords);
+  const [bilgeWaterRecords, setBilgeWaterRecords] = useState<Record<string, BilgeWaterRecord[]>>(loadBilgeWaterRecords);
   const [handoverSummaries, setHandoverSummaries] = useState<Record<string, HandoverSummary>>(loadHandoverSummaries);
 
   const currentShift = SHIFTS.find((s) => s.id === currentShiftId) ?? SHIFTS[0];
@@ -70,10 +79,18 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
 
   const currentRecords = records[currentShiftId] ?? [];
   const currentEngineRoomRecords = engineRoomRecords[currentShiftId] ?? [];
+  const currentBilgeWaterRecords = bilgeWaterRecords[currentShiftId] ?? [];
 
   const allEngineRoomRecords = Object.values(engineRoomRecords).flat();
   const latestEngineRoomRecord = allEngineRoomRecords.length > 0
     ? allEngineRoomRecords.reduce((latest, record) =>
+        new Date(record.createdAt) > new Date(latest.createdAt) ? record : latest
+      )
+    : null;
+
+  const allBilgeWaterRecords = Object.values(bilgeWaterRecords).flat();
+  const latestBilgeWaterRecord = allBilgeWaterRecords.length > 0
+    ? allBilgeWaterRecords.reduce((latest, record) =>
         new Date(record.createdAt) > new Date(latest.createdAt) ? record : latest
       )
     : null;
@@ -124,6 +141,26 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
           [currentShiftId]: [...(prev[currentShiftId] ?? []), newRecord],
         };
         saveEngineRoomRecords(updated);
+        return updated;
+      });
+    },
+    [currentShiftId]
+  );
+
+  const addBilgeWaterRecord = useCallback(
+    (input: Omit<BilgeWaterRecord, "id" | "shiftId" | "createdAt">) => {
+      const newRecord: BilgeWaterRecord = {
+        ...input,
+        id: crypto.randomUUID(),
+        shiftId: currentShiftId,
+        createdAt: new Date().toISOString(),
+      };
+      setBilgeWaterRecords((prev) => {
+        const updated = {
+          ...prev,
+          [currentShiftId]: [...(prev[currentShiftId] ?? []), newRecord],
+        };
+        saveBilgeWaterRecords(updated);
         return updated;
       });
     },
@@ -209,6 +246,25 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
       );
     }
 
+    const shiftBilgeRecords = bilgeWaterRecords[currentShiftId] ?? [];
+    if (shiftBilgeRecords.length > 0) {
+      const latest = shiftBilgeRecords[shiftBilgeRecords.length - 1];
+      const levelTag = latest.liquidLevel >= 90 ? "⚠危险" : latest.liquidLevel >= 80 ? "⚠警戒" : "正常";
+      parts.push(
+        `【舱底水状态】液位 ${latest.liquidLevel}%（${levelTag}），泵状态：${latest.pumpStatus}，运行时长：${latest.pumpRunDuration} min，处理结果：${latest.treatmentResult}` +
+        (latest.warningNote ? `，备注：${latest.warningNote}` : "")
+      );
+      const unfinishedBilge = shiftBilgeRecords.filter(
+        (r) => r.treatmentResult === "未处理" || r.treatmentResult === "处理中" || r.treatmentResult === "待分离" || r.treatmentResult === "异常" || r.liquidLevel >= 80
+      );
+      if (unfinishedBilge.length > 0) {
+        const bilgeItems = unfinishedBilge.map(
+          (r, i) => `${i + 1}. 液位 ${r.liquidLevel}%，泵${r.pumpStatus}，处理${r.treatmentResult}${r.warningNote ? "：" + r.warningNote : ""}`
+        );
+        parts.push(`【舱底水·需关注】\n${bilgeItems.join("\n")}`);
+      }
+    }
+
     const shiftAnomalies = (anomalyRecords[currentShiftId] ?? []).filter(
       (r) => r.currentStatus !== "已关闭"
     );
@@ -234,7 +290,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     }
 
     return parts.join("\n\n");
-  }, [currentShiftId, engineRoomRecords, anomalyRecords, records]);
+  }, [currentShiftId, engineRoomRecords, bilgeWaterRecords, anomalyRecords, records]);
 
   const saveHandover = useCallback(
     (manualNote: string, isDraft: boolean) => {
@@ -281,6 +337,11 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         allAnomalyRecords,
         addAnomalyRecord,
         updateAnomalyStatus,
+        bilgeWaterRecords,
+        currentBilgeWaterRecords,
+        latestBilgeWaterRecord,
+        allBilgeWaterRecords,
+        addBilgeWaterRecord,
         handoverSummaries,
         currentHandoverSummary,
         previousShiftSummary,
