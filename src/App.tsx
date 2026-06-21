@@ -66,36 +66,58 @@ function Dashboard() {
     if (!latestBilgeWaterRecord) return null;
     const levelStatus = getBilgeLevelStatus(latestBilgeWaterRecord.liquidLevel);
     const treatmentUnfinished = isBilgeTreatmentUnfinished(latestBilgeWaterRecord.treatmentResult);
-    if (levelStatus !== "normal" || treatmentUnfinished) {
-      return { levelStatus, treatmentUnfinished, record: latestBilgeWaterRecord };
+    const pumpFault = latestBilgeWaterRecord.pumpStatus === "故障";
+    if (levelStatus !== "normal" || treatmentUnfinished || pumpFault) {
+      return { levelStatus, treatmentUnfinished, pumpFault, record: latestBilgeWaterRecord };
     }
     return null;
   })();
+
+  const alertType = bilgeAlert
+    ? bilgeAlert.levelStatus === "danger"
+      ? "danger"
+      : bilgeAlert.pumpFault
+      ? "danger"
+      : bilgeAlert.treatmentUnfinished && bilgeAlert.levelStatus === "normal"
+      ? "warning"
+      : bilgeAlert.levelStatus
+    : "normal";
 
   return (
     <section className="metrics">
       {project.metrics.map((metric, index) => {
         const isBilge = metric === "舱底水液位";
         const bilgeClass = isBilge && bilgeAlert
-          ? `metric-alert metric-alert-${bilgeAlert.levelStatus}`
+          ? `metric-alert metric-alert-${alertType}`
           : "";
         return (
           <article key={metric} className={bilgeClass}>
             <small>
               {metric}
-              {isBilge && bilgeAlert && <span className="metric-alert-dot" />}
+              {isBilge && bilgeAlert && (
+                <span className={`metric-alert-badge badge-${alertType}`}>
+                  {alertType === "danger" ? "⚠ 危险" : "⚠ 警戒"}
+                </span>
+              )}
             </small>
-            <strong className={isBilge && bilgeAlert ? `level-text level-${bilgeAlert.levelStatus}` : ""}>
+            <strong className={isBilge && bilgeAlert ? `level-text level-${alertType}` : ""}>
               {metricValues[index]}
               {metricValues[index] !== "--" && (
                 <span className="unit">{project.metricUnits[index]}</span>
               )}
             </strong>
             {isBilge && latestBilgeWaterRecord ? (
-              <small className="record-time">
-                {new Date(latestBilgeWaterRecord.createdAt).toLocaleString("zh-CN")}
-                {bilgeAlert && <span className="metric-alert-note"> · 需关注</span>}
-              </small>
+              <div className="record-time bilge-record-time">
+                <span>{new Date(latestBilgeWaterRecord.createdAt).toLocaleString("zh-CN")}</span>
+                {bilgeAlert && (
+                  <div className="bilge-metric-alert-info">
+                    {bilgeAlert.levelStatus === "danger" && <span>液位危险</span>}
+                    {bilgeAlert.levelStatus === "warning" && <span>液位警戒</span>}
+                    {bilgeAlert.pumpFault && <span>泵故障</span>}
+                    {bilgeAlert.treatmentUnfinished && <span>处理未完成</span>}
+                  </div>
+                )}
+              </div>
             ) : latestEngineRoomRecord ? (
               <small className="record-time">
                 {new Date(latestEngineRoomRecord.createdAt).toLocaleString("zh-CN")}

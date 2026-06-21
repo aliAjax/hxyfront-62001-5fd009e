@@ -411,13 +411,16 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
       if (shiftBilgeRecords.length > 0) {
         const latest = shiftBilgeRecords[shiftBilgeRecords.length - 1];
         const levelTag = latest.liquidLevel >= 90 ? "⚠危险" : latest.liquidLevel >= 80 ? "⚠警戒" : "✓正常";
+        const latestTime = new Date(latest.createdAt).toLocaleString("zh-CN");
         parts.push(
           `\n【舱底水状态】\n` +
+          `  最新记录时间：${latestTime}\n` +
           `  液位：${latest.liquidLevel}%（${levelTag}）\n` +
           `  泵状态：${latest.pumpStatus}\n` +
           `  运行时长：${latest.pumpRunDuration} min\n` +
           `  处理结果：${latest.treatmentResult}` +
-          (latest.warningNote ? `\n  备注：${latest.warningNote}` : "")
+          (latest.warningNote ? `\n  警戒线备注：${latest.warningNote}` : "") +
+          `\n  本班次记录总数：${shiftBilgeRecords.length} 条`
         );
 
         const unfinishedBilge = shiftBilgeRecords.filter(
@@ -431,10 +434,20 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
               else if (r.liquidLevel >= 80) issues.push("液位警戒");
               if (r.pumpStatus === "故障") issues.push("泵故障");
               if (isBilgeTreatmentUnfinished(r.treatmentResult)) issues.push(`处理${r.treatmentResult}`);
-              return `${i + 1}. 液位 ${r.liquidLevel}% [${issues.join("，")}]${r.warningNote ? " - " + r.warningNote : ""}`;
+              const recordTime = new Date(r.createdAt).toLocaleString("zh-CN");
+              return `${i + 1}. [${recordTime}] 液位 ${r.liquidLevel}% [${issues.join("，")}]${r.warningNote ? " - 备注：" + r.warningNote : ""}`;
             }
           );
-          parts.push(`\n【舱底水·需关注事项】\n${bilgeItems.join("\n")}`);
+          parts.push(
+            `\n【舱底水·需关注事项】\n` +
+            `  ⚠ 共 ${unfinishedBilge.length} 条舱底水记录需关注，请下一班重点跟进：\n` +
+            `${bilgeItems.join("\n")}`
+          );
+        }
+
+        const normalBilgeCount = shiftBilgeRecords.length - unfinishedBilge.length;
+        if (normalBilgeCount > 0 && unfinishedBilge.length > 0) {
+          parts.push(`\n  ✓ 另有 ${normalBilgeCount} 条记录状态正常`);
         }
       } else {
         parts.push(`\n【舱底水状态】\n  本班次暂无舱底水记录`);
@@ -487,17 +500,31 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         parts.push(`\n【未完成处理事项】\n${items.join("\n")}`);
       }
 
-      const totalUnfinished = shiftAnomalies.length + shiftUnfinishedRecords.length +
-        shiftBilgeRecords.filter((r) => isBilgeTreatmentUnfinished(r.treatmentResult) || r.liquidLevel >= 80 || r.pumpStatus === "故障").length;
+      const bilgeUnfinishedCount = shiftBilgeRecords.filter(
+        (r) => isBilgeTreatmentUnfinished(r.treatmentResult) || r.liquidLevel >= 80 || r.pumpStatus === "故障"
+      ).length;
+
+      const totalUnfinished = shiftAnomalies.length + shiftUnfinishedRecords.length + bilgeUnfinishedCount;
 
       if (totalUnfinished > 0) {
         parts.push(`\n═══════════════════════════════`);
         parts.push(`⚠ 交接提醒：本班次共有 ${totalUnfinished} 项需关注的事项`);
+        parts.push(`  明细分类：`);
+        if (shiftAnomalies.length > 0) {
+          parts.push(`    • 异常巡检项：${shiftAnomalies.length} 项未关闭`);
+        }
+        if (bilgeUnfinishedCount > 0) {
+          parts.push(`    • 舱底水系统：${bilgeUnfinishedCount} 条记录需关注`);
+        }
+        if (shiftUnfinishedRecords.length > 0) {
+          parts.push(`    • 未完成处理事项：${shiftUnfinishedRecords.length} 项`);
+        }
         parts.push(`  请下一班次轮机员重点处理上述标记项目。`);
         parts.push(`═══════════════════════════════`);
       } else {
         parts.push(`\n═══════════════════════════════`);
         parts.push(`✓ 本班次运行正常，所有项目已妥善处理。`);
+        parts.push(`  舱底水系统运行正常，无异常需关注。`);
         parts.push(`═══════════════════════════════`);
       }
 

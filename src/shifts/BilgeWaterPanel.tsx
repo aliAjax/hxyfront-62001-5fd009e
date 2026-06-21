@@ -368,16 +368,47 @@ export function BilgeWaterPanel() {
         <div className="bilge-history-list">
           <div className="bilge-form-divider" style={{ marginTop: "20px" }}>
             <span>本班次记录历史（{sortedRecords.length}）</span>
+            {sortedRecords.filter(
+              (r) =>
+                getBilgeLevelStatus(r.liquidLevel) !== "normal" ||
+                isBilgeTreatmentUnfinished(r.treatmentResult) ||
+                r.pumpStatus === "故障"
+            ).length > 0 && (
+              <span className="history-alert-count">
+                <span className="alert-dot-small" />
+                需关注{" "}
+                {
+                  sortedRecords.filter(
+                    (r) =>
+                      getBilgeLevelStatus(r.liquidLevel) !== "normal" ||
+                      isBilgeTreatmentUnfinished(r.treatmentResult) ||
+                      r.pumpStatus === "故障"
+                  ).length
+                }
+                条
+              </span>
+            )}
           </div>
           {sortedRecords.map((record) => {
             const recLevelStatus = getBilgeLevelStatus(record.liquidLevel);
+            const recTreatmentUnfinished = isBilgeTreatmentUnfinished(record.treatmentResult);
+            const recPumpFault = record.pumpStatus === "故障";
+            const isAlertRec =
+              recLevelStatus !== "normal" || recTreatmentUnfinished || recPumpFault;
             return (
               <div
                 key={record.id}
-                className={`bilge-history-item ${editingRecordId === record.id ? "bilge-history-editing" : ""}`}
+                className={`bilge-history-item ${editingRecordId === record.id ? "bilge-history-editing" : ""} ${
+                  isAlertRec ? "bilge-history-alert" : ""
+                } ${recLevelStatus === "danger" ? "bilge-history-danger" : ""}`}
               >
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "6px" }}>
+                    {isAlertRec && (
+                      <span className={`history-alert-icon ${recLevelStatus === "danger" ? "danger-icon" : "warning-icon"}`}>
+                        {recLevelStatus === "danger" ? "🚨" : "⚠️"}
+                      </span>
+                    )}
                     <strong className={`bilge-level-value level-${recLevelStatus}`}>
                       {record.liquidLevel}%
                       <span className="level-status-tag">
@@ -396,9 +427,17 @@ export function BilgeWaterPanel() {
                       <span style={{ fontSize: "11px", color: "#94a3b8" }}>（已编辑）</span>
                     )}
                   </div>
+                  {isAlertRec && (
+                    <div className="history-alert-tags">
+                      {recLevelStatus === "danger" && <span className="alert-tag alert-danger">液位危险</span>}
+                      {recLevelStatus === "warning" && <span className="alert-tag alert-warning">液位警戒</span>}
+                      {recPumpFault && <span className="alert-tag alert-danger">泵故障</span>}
+                      {recTreatmentUnfinished && <span className="alert-tag alert-warning">处理未完成</span>}
+                    </div>
+                  )}
                   {record.warningNote && (
-                    <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
-                      备注：{record.warningNote}
+                    <p className="history-warning-note">
+                      📝 {record.warningNote}
                     </p>
                   )}
                   <small style={{ display: "block", marginTop: "4px", color: "#94a3b8" }}>

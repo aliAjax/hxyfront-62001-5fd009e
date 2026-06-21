@@ -271,12 +271,12 @@ export function DeviceHistoryPage({
         <thead>
           <tr>
             <th>班次</th>
-            <th>液位</th>
+            <th>液位状态</th>
             <th>泵状态</th>
             <th>运行时长</th>
             <th>处理结果</th>
             <th>警戒线备注</th>
-            <th>状态</th>
+            <th>状态详情</th>
             <th>时间</th>
           </tr>
         </thead>
@@ -284,11 +284,15 @@ export function DeviceHistoryPage({
           {records.map((record) => {
             const levelStatus = getBilgeLevelStatus(record.liquidLevel);
             const treatmentUnfinished = isBilgeTreatmentUnfinished(record.treatmentResult);
-            const isAlert = levelStatus !== "normal" || treatmentUnfinished;
+            const pumpFault = record.pumpStatus === "故障";
+            const isAlert = levelStatus !== "normal" || treatmentUnfinished || pumpFault;
+            const alertLevel = levelStatus === "danger" || pumpFault ? "danger" : levelStatus === "warning" ? "warning" : treatmentUnfinished ? "warning" : "normal";
             return (
               <tr
                 key={record.id}
-                className={isAlert ? "bilge-alert-row" : ""}
+                className={`bilge-alert-row bilge-alert-${alertLevel} ${
+                  alertLevel === "danger" ? "bilge-alert-row-danger" : ""
+                }`}
               >
                 <td>
                   <span className="shift-badge">{getShiftLabel(record.shiftId)}</span>
@@ -300,7 +304,12 @@ export function DeviceHistoryPage({
                     </span>
                     {levelStatus !== "normal" && (
                       <span className={`bilge-level-tag level-tag-${levelStatus}`}>
-                        {levelStatus === "danger" ? "危险" : "警戒"}
+                        {levelStatus === "danger" ? "🚨 危险" : "⚠️ 警戒"}
+                      </span>
+                    )}
+                    {levelStatus === "normal" && (
+                      <span className="bilge-level-tag level-tag-normal">
+                        ✓ 正常
                       </span>
                     )}
                   </div>
@@ -322,12 +331,20 @@ export function DeviceHistoryPage({
                 </td>
                 <td>
                   {isAlert ? (
-                    <span className="bilge-status-alert">
-                      <span className="alert-icon-small" />
-                      需关注
-                    </span>
+                    <div className="bilge-status-detail">
+                      <span className={`bilge-status-alert status-${alertLevel}`}>
+                        <span className="alert-icon-small" />
+                        需关注
+                      </span>
+                      <div className="alert-detail-tags">
+                        {levelStatus === "danger" && <span className="detail-tag detail-danger">液位危险</span>}
+                        {levelStatus === "warning" && <span className="detail-tag detail-warning">液位警戒</span>}
+                        {pumpFault && <span className="detail-tag detail-danger">泵故障</span>}
+                        {treatmentUnfinished && <span className="detail-tag detail-warning">处理未完成</span>}
+                      </div>
+                    </div>
                   ) : (
-                    <span className="bilge-status-ok">正常</span>
+                    <span className="bilge-status-ok">✓ 全部正常</span>
                   )}
                 </td>
                 <td className="time-cell">
