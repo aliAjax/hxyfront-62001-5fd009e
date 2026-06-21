@@ -331,6 +331,31 @@ input {
   margin-top: -4px;
 }
 
+.diff-hint {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.diff-hint.diff-up {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.diff-hint.diff-down {
+  color: #16a34a;
+  background: #f0fdf4;
+}
+
+.diff-hint.diff-zero {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
 .last-record {
   margin-top: 16px;
   padding-top: 12px;

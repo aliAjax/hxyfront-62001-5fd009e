@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useShift } from "./ShiftContext";
 import { generateIdempotencyKey, type EngineRoomRecord } from "./domain";
 
@@ -21,6 +21,7 @@ export function EngineRoomPanel() {
     currentShift,
     latestEngineRoomRecord,
     currentEngineRoomRecords,
+    engineRoomRecords,
     addEngineRoomRecord,
     updateEngineRoomRecord,
     deleteEngineRoomRecord,
@@ -163,6 +164,35 @@ export function EngineRoomPanel() {
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 
+  const allSortedRecords = useMemo(() => {
+    const all = Object.values(engineRoomRecords)
+      .flat()
+      .filter((r) => !r.deletedAt);
+    return all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [engineRoomRecords]);
+
+  const comparisonRecord = useMemo<EngineRoomRecord | null>(() => {
+    if (editingRecord) {
+      const idx = allSortedRecords.findIndex((r) => r.id === editingRecord.id);
+      if (idx >= 0 && idx < allSortedRecords.length - 1) {
+        return allSortedRecords[idx + 1];
+      }
+      return null;
+    }
+    return latestEngineRoomRecord ?? null;
+  }, [editingRecord, allSortedRecords, latestEngineRoomRecord]);
+
+  const computeDiff = (field: keyof EngineRoomForm): { value: number; sign: "up" | "down" | "zero" } | null => {
+    if (!comparisonRecord) return null;
+    const current = Number(form[field]);
+    const prev = comparisonRecord[field as keyof EngineRoomRecord] as number;
+    if (isNaN(current) || isNaN(prev)) return null;
+    const diff = Number((current - prev).toFixed(2));
+    if (diff > 0) return { value: diff, sign: "up" };
+    if (diff < 0) return { value: diff, sign: "down" };
+    return { value: 0, sign: "zero" };
+  };
+
   const formTitle = editingRecord ? "编辑记录" : "参数录入";
   const submitButtonText = editingRecord
     ? saved
@@ -189,22 +219,32 @@ export function EngineRoomPanel() {
         </div>
       </div>
       <div className="field-grid">
-        {engineRoomFields.map((field) => (
-          <label key={field.key}>
-            <span>
-              {field.label} ({field.unit})
-            </span>
-            <input
-              type="number"
-              step="any"
-              placeholder={field.placeholder}
-              value={form[field.key]}
-              onChange={(e) => handleChange(field.key, e.target.value)}
-              className={errors[field.key] ? "input-error" : ""}
-            />
-            {errors[field.key] && <span className="error-text">{errors[field.key]}</span>}
-          </label>
-        ))}
+        {engineRoomFields.map((field) => {
+          const diff = computeDiff(field.key);
+          return (
+            <label key={field.key}>
+              <span>
+                {field.label} ({field.unit})
+              </span>
+              <input
+                type="number"
+                step="any"
+                placeholder={field.placeholder}
+                value={form[field.key]}
+                onChange={(e) => handleChange(field.key, e.target.value)}
+                className={errors[field.key] ? "input-error" : ""}
+              />
+              {diff && (
+                <span className={`diff-hint diff-${diff.sign}`}>
+                  {diff.sign === "up" && `↑ +${diff.value} ${field.unit}`}
+                  {diff.sign === "down" && `↓ ${diff.value} ${field.unit}`}
+                  {diff.sign === "zero" && "— 无变化"}
+                </span>
+              )}
+              {errors[field.key] && <span className="error-text">{errors[field.key]}</span>}
+            </label>
+          );
+        })}
       </div>
       {duplicateWarning && (
         <div style={{ marginTop: "12px", padding: "10px 14px", borderRadius: "6px", background: "#fef3c7", color: "#92400e", fontSize: "13px", fontWeight: 500 }}>
