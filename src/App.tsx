@@ -168,7 +168,7 @@ function RecordForm({
     } else {
       const newKey = Date.now().toString() + Math.random().toString(36).slice(2);
       setIdempotencyKey(newKey);
-      const result = addRecord(form);
+      const result = addRecord({ ...form, idempotencyKey: newKey });
       if (!result.created) {
         setDuplicateWarning(true);
         setTimeout(() => setDuplicateWarning(false), 3000);

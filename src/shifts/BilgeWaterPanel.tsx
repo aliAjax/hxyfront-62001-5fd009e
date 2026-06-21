@@ -107,6 +107,7 @@ export function BilgeWaterPanel() {
       pumpRunDuration: Number(form.pumpRunDuration),
       treatmentResult: form.treatmentResult,
       warningNote: form.warningNote.trim(),
+      idempotencyKey,
     });
 
     if (!result.created) {

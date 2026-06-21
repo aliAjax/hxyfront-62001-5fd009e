@@ -86,7 +86,7 @@ export function EngineRoomPanel() {
       fuelConsumption: Number(form.fuelConsumption),
     };
 
-    const result = addEngineRoomRecord(payload);
+    const result = addEngineRoomRecord({ ...payload, idempotencyKey });
 
     if (result.created) {
       setSaved(true);

@@ -4,6 +4,7 @@ import {
   ANOMALY_STATUS_OPTIONS,
   SHIFTS,
   getStatusClass,
+  generateIdempotencyKey,
   type AnomalyStatus,
   type AnomalyRecord,
 } from "./domain";
@@ -60,8 +61,10 @@ function getShiftLabelById(shiftId: string): string {
 
 function AnomalyForm({
   onSubmit,
+  idempotencyKey,
 }: {
-  onSubmit: (data: AnomalyFormData) => { created: boolean };
+  onSubmit: (data: AnomalyFormData & { idempotencyKey: string }) => { created: boolean };
+  idempotencyKey: string;
 }) {
   const { currentShift } = useShift();
   const [form, setForm] = useState<AnomalyFormData>({
@@ -71,7 +74,7 @@ function AnomalyForm({
     reviewTime: formatDateTimeLocal(new Date().toISOString()),
     handoverNote: "",
   });
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Partial<Record<string, string>>>({});
   const [saved, setSaved] = useState(false);
   const [duplicateError, setDuplicateError] = useState("");
 
@@ -92,7 +95,7 @@ function AnomalyForm({
 
   const handleSubmit = () => {
     if (!validate()) return;
-    const result = onSubmit(form);
+    const result = onSubmit({ ...form, idempotencyKey });
     if (!result.created) {
       setDuplicateError("该异常记录已存在，请勿重复提交");
       return;
@@ -292,7 +295,7 @@ function AnomalyEditModal({
     reviewTime: formatDateTimeLocal(record.reviewTime),
     handoverNote: record.handoverNote,
   });
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Partial<Record<string, string>>>({});
 
   const handleChange = (field: keyof AnomalyEditForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -635,6 +638,7 @@ export function AnomalyTimeline() {
   const [filterStatus, setFilterStatus] = useState<AnomalyStatus | "全部">("全部");
   const [filterCarriedOver, setFilterCarriedOver] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [anomalyFormKey, setAnomalyFormKey] = useState(generateIdempotencyKey());
 
   const showToast = (text: string, type: ToastMessage["type"] = "info") => {
     const id = crypto.randomUUID();
@@ -657,16 +661,18 @@ export function AnomalyTimeline() {
     );
   }, [allAnomalyRecords, filterStatus, filterCarriedOver]);
 
-  const handleSubmit = (data: AnomalyFormData) => {
+  const handleSubmit = (data: AnomalyFormData & { idempotencyKey: string }) => {
     const result = addAnomalyRecord({
       device: data.device.trim(),
       anomalyDescription: data.anomalyDescription.trim(),
       status: data.status,
       reviewTime: data.reviewTime ? new Date(data.reviewTime).toISOString() : "",
       handoverNote: data.handoverNote.trim(),
+      idempotencyKey: data.idempotencyKey,
     });
     if (result.created) {
       showToast("交接班摘要将自动更新", "info");
+      setAnomalyFormKey(generateIdempotencyKey());
     }
     return result;
   };
@@ -684,13 +690,13 @@ export function AnomalyTimeline() {
     recordId: string,
     patch: Partial<AnomalyEditForm>
   ) => {
-    updateAnomalyRecord(recordId, patch, currentShift.label);
+    updateAnomalyRecord(recordId, patch);
     showToast("交接班摘要将自动更新", "info");
   };
 
   const handleDelete = () => {
     if (deletingRecord) {
-      deleteAnomalyRecord(deletingRecord.id, currentShift.label);
+      deleteAnomalyRecord(deletingRecord.id);
       showToast("交接班摘要将自动更新", "info");
       setDeletingRecord(null);
     }
@@ -700,7 +706,7 @@ export function AnomalyTimeline() {
     <section className="anomaly-timeline-module">
       <ToastContainer toasts={toasts} />
 
-      <AnomalyForm onSubmit={handleSubmit} />
+      <AnomalyForm onSubmit={handleSubmit} idempotencyKey={anomalyFormKey} />
 
       <section className="panel timeline-panel">
         <div className="heading">

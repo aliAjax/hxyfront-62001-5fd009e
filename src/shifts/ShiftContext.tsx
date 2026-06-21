@@ -33,19 +33,19 @@ interface ShiftContextValue {
   setCurrentShiftId: (id: string) => void;
   records: Record<string, WatchRecord[]>;
   currentRecords: WatchRecord[];
-  addRecord: (record: Omit<WatchRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory">) => { record: WatchRecord; created: boolean };
+  addRecord: (record: Omit<WatchRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory"> & { idempotencyKey?: string }) => { record: WatchRecord; created: boolean };
   removeRecord: (id: string) => void;
   updateRecord: (id: string, patch: Partial<WatchRecord>) => WatchRecord | null;
   deleteRecord: (id: string) => void;
   engineRoomRecords: Record<string, EngineRoomRecord[]>;
   currentEngineRoomRecords: EngineRoomRecord[];
   latestEngineRoomRecord: EngineRoomRecord | null;
-  addEngineRoomRecord: (record: Omit<EngineRoomRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory">) => { record: EngineRoomRecord; created: boolean };
+  addEngineRoomRecord: (record: Omit<EngineRoomRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory"> & { idempotencyKey?: string }) => { record: EngineRoomRecord; created: boolean };
   updateEngineRoomRecord: (id: string, patch: Partial<EngineRoomRecord>) => EngineRoomRecord | null;
   deleteEngineRoomRecord: (id: string) => void;
   anomalyRecords: Record<string, AnomalyRecord[]>;
   allAnomalyRecords: AnomalyRecord[];
-  addAnomalyRecord: (record: Omit<AnomalyRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "initialStatus" | "currentStatus" | "statusHistory" | "carryOverFromShiftId" | "isCarriedOver"> & { status: AnomalyStatus }) => { record: AnomalyRecord; created: boolean };
+  addAnomalyRecord: (record: Omit<AnomalyRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "initialStatus" | "currentStatus" | "statusHistory" | "carryOverFromShiftId" | "isCarriedOver"> & { status: AnomalyStatus; idempotencyKey?: string }) => { record: AnomalyRecord; created: boolean };
   updateAnomalyStatus: (recordId: string, newStatus: AnomalyStatus, note: string, operator: string) => void;
   updateAnomalyRecord: (id: string, patch: Partial<AnomalyRecord>) => AnomalyRecord | null;
   deleteAnomalyRecord: (id: string) => void;
@@ -53,7 +53,7 @@ interface ShiftContextValue {
   currentBilgeWaterRecords: BilgeWaterRecord[];
   latestBilgeWaterRecord: BilgeWaterRecord | null;
   allBilgeWaterRecords: BilgeWaterRecord[];
-  addBilgeWaterRecord: (record: Omit<BilgeWaterRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory">) => { record: BilgeWaterRecord; created: boolean };
+  addBilgeWaterRecord: (record: Omit<BilgeWaterRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory"> & { idempotencyKey?: string }) => { record: BilgeWaterRecord; created: boolean };
   updateBilgeWaterRecord: (id: string, patch: Partial<BilgeWaterRecord>) => BilgeWaterRecord | null;
   deleteBilgeWaterRecord: (id: string) => void;
   handoverSummaries: Record<string, HandoverSummary>;
@@ -186,8 +186,8 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   }, [repository, currentShiftId, anomalyRecords]);
 
   const addRecord = useCallback(
-    (input: Omit<WatchRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory">) => {
-      const key = generateIdempotencyKey();
+    (input: Omit<WatchRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory"> & { idempotencyKey?: string }) => {
+      const key = input.idempotencyKey ?? generateIdempotencyKey();
       setLastSubmissionKey(key);
       const result = repository.addRecord({ ...input, shiftId: currentShiftId, idempotencyKey: key });
       if (!result.created) {
@@ -220,8 +220,8 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   );
 
   const addEngineRoomRecord = useCallback(
-    (input: Omit<EngineRoomRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory">) => {
-      const key = generateIdempotencyKey();
+    (input: Omit<EngineRoomRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory"> & { idempotencyKey?: string }) => {
+      const key = input.idempotencyKey ?? generateIdempotencyKey();
       setLastSubmissionKey(key);
       const result = repository.addEngineRoomRecord({ ...input, shiftId: currentShiftId, idempotencyKey: key });
       if (!result.created) {
@@ -247,8 +247,8 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   );
 
   const addBilgeWaterRecord = useCallback(
-    (input: Omit<BilgeWaterRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory">) => {
-      const key = generateIdempotencyKey();
+    (input: Omit<BilgeWaterRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "isEdited" | "editedAt" | "editedBy" | "editHistory"> & { idempotencyKey?: string }) => {
+      const key = input.idempotencyKey ?? generateIdempotencyKey();
       setLastSubmissionKey(key);
       const result = repository.addBilgeWaterRecord({ ...input, shiftId: currentShiftId, idempotencyKey: key });
       if (!result.created) {
@@ -274,8 +274,8 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   );
 
   const addAnomalyRecord = useCallback(
-    (input: Omit<AnomalyRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "initialStatus" | "currentStatus" | "statusHistory" | "carryOverFromShiftId" | "isCarriedOver"> & { status: AnomalyStatus }) => {
-      const key = generateIdempotencyKey();
+    (input: Omit<AnomalyRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "initialStatus" | "currentStatus" | "statusHistory" | "carryOverFromShiftId" | "isCarriedOver"> & { status: AnomalyStatus; idempotencyKey?: string }) => {
+      const key = input.idempotencyKey ?? generateIdempotencyKey();
       setLastSubmissionKey(key);
       const result = repository.addAnomalyRecord({ ...input, shiftId: currentShiftId, idempotencyKey: key });
       if (!result.created) {
