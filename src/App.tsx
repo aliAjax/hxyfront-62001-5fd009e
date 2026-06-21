@@ -5,6 +5,7 @@ import { ShiftSelector } from "./shifts/ShiftSelector";
 import { EngineRoomPanel } from "./shifts/EngineRoomPanel";
 import { AnomalyTimeline } from "./shifts/AnomalyTimeline";
 import { useShift } from "./shifts/ShiftContext";
+import { ShiftHandover } from "./shifts/ShiftHandover";
 
 import { DeviceHistoryPage } from "./shifts/DeviceHistoryPage";
 
@@ -232,6 +233,8 @@ function AppContent() {
       </section>
 
       <AnomalyTimeline />
+
+      <ShiftHandover />
 
       <HistoryRecords />
     </main>

@@ -135,6 +135,39 @@ export const ANOMALY_STATUS_OPTIONS: AnomalyStatus[] = [
   "已关闭",
 ];
 
+export interface HandoverSummary {
+  id: string;
+  shiftId: string;
+  autoSummary: string;
+  manualNote: string;
+  isDraft: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const STORAGE_KEY_HANDOVER = "handover-summaries";
+
+export function loadHandoverSummaries(): Record<string, HandoverSummary> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_HANDOVER);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+export function saveHandoverSummaries(summaries: Record<string, HandoverSummary>): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_HANDOVER, JSON.stringify(summaries));
+  } catch {}
+}
+
+export function getPreviousShiftId(currentShiftId: string): string | null {
+  const idx = SHIFTS.findIndex((s) => s.id === currentShiftId);
+  if (idx === -1) return null;
+  const prevIdx = (idx - 1 + SHIFTS.length) % SHIFTS.length;
+  return SHIFTS[prevIdx].id;
+}
+
 export function getStatusClass(status: AnomalyStatus): string {
   switch (status) {
     case "待处理":

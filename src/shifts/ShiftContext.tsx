@@ -13,6 +13,7 @@ import {
   type AnomalyRecord,
   type AnomalyStatus,
   type StatusUpdate,
+  type HandoverSummary,
   SHIFTS,
   loadCurrentShiftId,
   saveCurrentShiftId,
@@ -22,6 +23,9 @@ import {
   saveEngineRoomRecords,
   loadAnomalyRecords,
   saveAnomalyRecords,
+  loadHandoverSummaries,
+  saveHandoverSummaries,
+  getPreviousShiftId,
 } from "./types";
 
 interface ShiftContextValue {
@@ -40,6 +44,10 @@ interface ShiftContextValue {
   allAnomalyRecords: AnomalyRecord[];
   addAnomalyRecord: (record: Omit<AnomalyRecord, "id" | "shiftId" | "createdAt" | "initialStatus" | "currentStatus" | "statusHistory" | "createdBy"> & { status: AnomalyStatus }) => void;
   updateAnomalyStatus: (recordId: string, newStatus: AnomalyStatus, note: string, operator: string) => void;
+  handoverSummaries: Record<string, HandoverSummary>;
+  currentHandoverSummary: HandoverSummary | null;
+  previousShiftSummary: HandoverSummary | null;
+  saveHandover: (manualNote: string, isDraft: boolean) => void;
 }
 
 const ShiftContext = createContext<ShiftContextValue | null>(null);
@@ -49,6 +57,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   const [records, setRecords] = useState<Record<string, WatchRecord[]>>(loadAllRecords);
   const [engineRoomRecords, setEngineRoomRecords] = useState<Record<string, EngineRoomRecord[]>>(loadEngineRoomRecords);
   const [anomalyRecords, setAnomalyRecords] = useState<Record<string, AnomalyRecord[]>>(loadAnomalyRecords);
+  const [handoverSummaries, setHandoverSummaries] = useState<Record<string, HandoverSummary>>(loadHandoverSummaries);
 
   const currentShift = SHIFTS.find((s) => s.id === currentShiftId) ?? SHIFTS[0];
 
@@ -181,6 +190,75 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const currentHandoverSummary = handoverSummaries[currentShiftId] ?? null;
+
+  const previousShiftSummary = (() => {
+    const prevId = getPreviousShiftId(currentShiftId);
+    if (!prevId) return null;
+    return handoverSummaries[prevId] ?? null;
+  })();
+
+  const generateAutoSummary = useCallback((): string => {
+    const parts: string[] = [];
+
+    const shiftRecords = engineRoomRecords[currentShiftId] ?? [];
+    if (shiftRecords.length > 0) {
+      const latest = shiftRecords[shiftRecords.length - 1];
+      parts.push(
+        `【机舱参数】主机转速 ${latest.mainEngineSpeed} rpm，滑油压力 ${latest.lubricatingOilPressure} MPa，冷却水温 ${latest.coolingWaterTemp} ℃，燃油消耗 ${latest.fuelConsumption} L/h`
+      );
+    }
+
+    const shiftAnomalies = (anomalyRecords[currentShiftId] ?? []).filter(
+      (r) => r.currentStatus !== "已关闭"
+    );
+    if (shiftAnomalies.length > 0) {
+      const items = shiftAnomalies.map(
+        (r) => `${r.device}（${r.currentStatus}）：${r.anomalyDescription}`
+      );
+      parts.push(`【异常巡检项·未关闭】\n${items.join("\n")}`);
+    }
+
+    const unfinishedRecords = (records[currentShiftId] ?? []).filter(
+      (r) => r.status && r.status !== "已解决" && r.status !== "正常巡检"
+    );
+    if (unfinishedRecords.length > 0) {
+      const items = unfinishedRecords.map(
+        (r) => `${r.device} - ${r.status}${r.anomaly ? "：" + r.anomaly : ""}`
+      );
+      parts.push(`【未完成处理】\n${items.join("\n")}`);
+    }
+
+    if (parts.length === 0) {
+      parts.push("本班次运行正常，无异常事项需交接。");
+    }
+
+    return parts.join("\n\n");
+  }, [currentShiftId, engineRoomRecords, anomalyRecords, records]);
+
+  const saveHandover = useCallback(
+    (manualNote: string, isDraft: boolean) => {
+      const autoSummary = generateAutoSummary();
+      const now = new Date().toISOString();
+      const existing = handoverSummaries[currentShiftId];
+      const summary: HandoverSummary = {
+        id: existing?.id ?? crypto.randomUUID(),
+        shiftId: currentShiftId,
+        autoSummary,
+        manualNote,
+        isDraft,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
+      setHandoverSummaries((prev) => {
+        const updated = { ...prev, [currentShiftId]: summary };
+        saveHandoverSummaries(updated);
+        return updated;
+      });
+    },
+    [currentShiftId, generateAutoSummary, handoverSummaries]
+  );
+
   useEffect(() => {
     saveCurrentShiftId(currentShiftId);
   }, [currentShiftId]);
@@ -203,6 +281,10 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         allAnomalyRecords,
         addAnomalyRecord,
         updateAnomalyStatus,
+        handoverSummaries,
+        currentHandoverSummary,
+        previousShiftSummary,
+        saveHandover,
       }}
     >
       {children}
