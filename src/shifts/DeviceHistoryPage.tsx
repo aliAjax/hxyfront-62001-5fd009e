@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect } from "react";
 import { useShift } from "./ShiftContext";
-import type { WatchRecord } from "./types";
+import type { AnomalyRecord, WatchRecord } from "./types";
 import type { BilgeWaterRecord } from "./types";
 import {
   SHIFTS,
+  getStatusClass,
   getBilgeLevelStatus,
   isBilgeTreatmentUnfinished,
 } from "./types";
@@ -38,7 +39,7 @@ export function DeviceHistoryPage({
   initialCategory?: DeviceCategory;
   initialDevice?: string;
 }) {
-  const { records, allBilgeWaterRecords } = useShift();
+  const { records, allBilgeWaterRecords, allAnomalyRecords } = useShift();
   const [activeCategory, setActiveCategory] = useState<DeviceCategory>(initialCategory ?? "主机");
   const [activeDevice, setActiveDevice] = useState<string | null>(initialDevice ?? null);
 
@@ -61,17 +62,25 @@ export function DeviceHistoryPage({
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const categoryRecords = allRecords.filter((r) => matchCategory(r.device, activeCategory));
+  const categoryAnomalies = allAnomalyRecords
+    .filter((r) => matchCategory(r.device, activeCategory))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const deviceNames = useMemo(() => {
     const names = new Set<string>();
     categoryRecords.forEach((r) => names.add(r.device));
+    categoryAnomalies.forEach((r) => names.add(r.device));
     return Array.from(names).sort();
-  }, [categoryRecords]);
+  }, [categoryRecords, categoryAnomalies]);
 
   const filtered = useMemo(() => {
     if (!activeDevice) return categoryRecords;
     return categoryRecords.filter((r) => r.device === activeDevice);
   }, [categoryRecords, activeDevice]);
+  const filteredAnomalies = useMemo(() => {
+    if (!activeDevice) return categoryAnomalies;
+    return categoryAnomalies.filter((r) => r.device === activeDevice);
+  }, [categoryAnomalies, activeDevice]);
 
   const sortedBilgeRecords: BilgeWaterRecord[] = useMemo(() =>
     [...allBilgeWaterRecords].sort(
@@ -97,7 +106,10 @@ export function DeviceHistoryPage({
           <button
             key={cat}
             className={`device-filter-tab${activeCategory === cat ? " active" : ""}`}
-            onClick={() => setActiveCategory(cat)}
+            onClick={() => {
+              setActiveCategory(cat);
+              setActiveDevice(null);
+            }}
           >
             {cat}
             {cat === "舱底水" && alertBilgeCount > 0 && (
@@ -114,11 +126,11 @@ export function DeviceHistoryPage({
         <section className="panel bilge-history-panel">
           <div className="heading">
             <div>
-              <p>舱底水 · 监控记录</p>
+              <p>舱底水 · 监控与异常记录</p>
               <h2>舱底水历史记录</h2>
             </div>
             <div className="history-stats-row">
-              <span className="record-count">共 {sortedBilgeRecords.length} 条</span>
+              <span className="record-count">共 {sortedBilgeRecords.length + categoryAnomalies.length} 条</span>
               {alertBilgeCount > 0 && (
                 <span className="bilge-alert-count">
                   <span className="alert-dot-blink" />
@@ -128,13 +140,13 @@ export function DeviceHistoryPage({
             </div>
           </div>
 
-          {sortedBilgeRecords.length === 0 ? (
+          {sortedBilgeRecords.length === 0 && categoryAnomalies.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon">💧</div>
               <p>暂无舱底水相关记录</p>
               <span>返回首页录入舱底水状态记录</span>
             </div>
-          ) : (
+          ) : sortedBilgeRecords.length > 0 ? (
             <div className="history-table-wrap">
               <table className="history-table bilge-history-table">
                 <thead>
@@ -208,6 +220,51 @@ export function DeviceHistoryPage({
                 </tbody>
               </table>
             </div>
+          ) : null}
+
+          {categoryAnomalies.length > 0 && (
+            <section className="history-subsection anomaly-history-section">
+              <div className="history-subsection-heading">
+                <h3>异常巡检记录</h3>
+                <span className="record-count">共 {categoryAnomalies.length} 条</span>
+              </div>
+              <div className="history-table-wrap">
+                <table className="history-table anomaly-history-table">
+                  <thead>
+                    <tr>
+                      <th>班次</th>
+                      <th>设备名称</th>
+                      <th>异常描述</th>
+                      <th>当前状态</th>
+                      <th>复查时间</th>
+                      <th>时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {categoryAnomalies.map((record) => (
+                      <tr key={record.id}>
+                        <td>
+                          <span className="shift-badge">{getShiftLabel(record.shiftId)}</span>
+                        </td>
+                        <td className="device-name">{record.device}</td>
+                        <td className="anomaly-text">{record.anomalyDescription}</td>
+                        <td>
+                          <span className={`status-tag ${getStatusClass(record.currentStatus)}`}>
+                            {record.currentStatus}
+                          </span>
+                        </td>
+                        <td className="time-cell">
+                          {record.reviewTime ? new Date(record.reviewTime).toLocaleString("zh-CN") : "--"}
+                        </td>
+                        <td className="time-cell">
+                          {new Date(record.createdAt).toLocaleString("zh-CN")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
         </section>
       ) : (
@@ -221,7 +278,7 @@ export function DeviceHistoryPage({
               </h2>
             </div>
             <div className="history-stats-row">
-              <span className="record-count">共 {filtered.length} 条</span>
+              <span className="record-count">共 {filtered.length + filteredAnomalies.length} 条</span>
               {activeDevice && (
                 <button
                   className="clear-device-filter-btn"
@@ -253,7 +310,7 @@ export function DeviceHistoryPage({
             </div>
           )}
 
-          {filtered.length === 0 ? (
+          {filtered.length === 0 && filteredAnomalies.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon">📋</div>
               <p>暂无{activeCategory}相关记录</p>
@@ -296,6 +353,51 @@ export function DeviceHistoryPage({
                 </tbody>
               </table>
             </div>
+          )}
+
+          {filteredAnomalies.length > 0 && (
+            <section className="history-subsection anomaly-history-section">
+              <div className="history-subsection-heading">
+                <h3>异常巡检记录</h3>
+                <span className="record-count">共 {filteredAnomalies.length} 条</span>
+              </div>
+              <div className="history-table-wrap">
+                <table className="history-table anomaly-history-table">
+                  <thead>
+                    <tr>
+                      <th>班次</th>
+                      <th>设备名称</th>
+                      <th>异常描述</th>
+                      <th>当前状态</th>
+                      <th>复查时间</th>
+                      <th>时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredAnomalies.map((record: AnomalyRecord) => (
+                      <tr key={record.id}>
+                        <td>
+                          <span className="shift-badge">{getShiftLabel(record.shiftId)}</span>
+                        </td>
+                        <td className="device-name">{record.device}</td>
+                        <td className="anomaly-text">{record.anomalyDescription}</td>
+                        <td>
+                          <span className={`status-tag ${getStatusClass(record.currentStatus)}`}>
+                            {record.currentStatus}
+                          </span>
+                        </td>
+                        <td className="time-cell">
+                          {record.reviewTime ? new Date(record.reviewTime).toLocaleString("zh-CN") : "--"}
+                        </td>
+                        <td className="time-cell">
+                          {new Date(record.createdAt).toLocaleString("zh-CN")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
         </section>
       )}

@@ -2470,6 +2470,33 @@ input {
   border-color: #dc2626;
 }
 
+.history-subsection {
+  margin-top: 18px;
+}
+
+.history-subsection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.history-subsection-heading h3 {
+  margin: 0;
+  color: #1e293b;
+  font-size: 16px;
+}
+
+.anomaly-history-section {
+  border-top: 1px dashed var(--border);
+  padding-top: 16px;
+}
+
+.anomaly-history-table .anomaly-text {
+  max-width: 320px;
+}
+
 @media (max-width: 860px) {
   .device-chip-filter {
     gap: 6px;
