@@ -81,29 +81,40 @@ function buildProcessedReminders(anomalyRecords: AnomalyRecord[]): ReminderItem[
 
 function buildContinuousAnomalyReminders(
   records: Record<string, WatchRecord[]>,
-  bilgeRecords: Record<string, BilgeWaterRecord[]>
+  bilgeRecords: Record<string, BilgeWaterRecord[]>,
+  anomalyRecords: Record<string, AnomalyRecord[]>
 ): ReminderItem[] {
   const reminders: ReminderItem[] = [];
 
   const deviceShiftMap: Record<string, string[]> = {};
   const deviceAnomalyMap: Record<string, { count: number; latestAnomaly: string; latestTime: string }> = {};
 
+  const addAnomalyForDevice = (device: string, shiftId: string, anomalyDesc: string, time: string) => {
+    if (!deviceShiftMap[device]) {
+      deviceShiftMap[device] = [];
+      deviceAnomalyMap[device] = { count: 0, latestAnomaly: "", latestTime: "" };
+    }
+    if (!deviceShiftMap[device].includes(shiftId)) {
+      deviceShiftMap[device].push(shiftId);
+    }
+    deviceAnomalyMap[device].count++;
+    if (!deviceAnomalyMap[device].latestTime || time > deviceAnomalyMap[device].latestTime) {
+      deviceAnomalyMap[device].latestAnomaly = anomalyDesc;
+      deviceAnomalyMap[device].latestTime = time;
+    }
+  };
+
   for (const [shiftId, shiftRecords] of Object.entries(records)) {
     for (const r of shiftRecords) {
       if (!r.anomaly || r.anomaly.trim() === "") continue;
-      const device = r.device;
-      if (!deviceShiftMap[device]) {
-        deviceShiftMap[device] = [];
-        deviceAnomalyMap[device] = { count: 0, latestAnomaly: "", latestTime: "" };
-      }
-      if (!deviceShiftMap[device].includes(shiftId)) {
-        deviceShiftMap[device].push(shiftId);
-      }
-      deviceAnomalyMap[device].count++;
-      if (!deviceAnomalyMap[device].latestTime || r.createdAt > deviceAnomalyMap[device].latestTime) {
-        deviceAnomalyMap[device].latestAnomaly = r.anomaly;
-        deviceAnomalyMap[device].latestTime = r.createdAt;
-      }
+      addAnomalyForDevice(r.device, shiftId, r.anomaly, r.createdAt);
+    }
+  }
+
+  for (const [shiftId, shiftAnomalies] of Object.entries(anomalyRecords)) {
+    for (const r of shiftAnomalies) {
+      if (r.currentStatus === "已关闭" || r.currentStatus === "已处理") continue;
+      addAnomalyForDevice(r.device, shiftId, r.anomalyDescription, r.createdAt);
     }
   }
 
@@ -197,7 +208,7 @@ type FilterType = "全部" | "待复查" | "连续异常" | "已处理";
 export function MaintenanceReminder({
   onNavigateToHistory,
 }: {
-  onNavigateToHistory: (category: DeviceCategory) => void;
+  onNavigateToHistory: (category: DeviceCategory, deviceName?: string) => void;
 }) {
   const { records, anomalyRecords, allAnomalyRecords, bilgeWaterRecords } = useShift();
   const [activeFilter, setActiveFilter] = useState<FilterType>("全部");
@@ -205,9 +216,9 @@ export function MaintenanceReminder({
   const allReminders = useMemo(() => {
     const review = buildReviewReminders(allAnomalyRecords);
     const processed = buildProcessedReminders(allAnomalyRecords);
-    const continuous = buildContinuousAnomalyReminders(records, bilgeWaterRecords);
+    const continuous = buildContinuousAnomalyReminders(records, bilgeWaterRecords, anomalyRecords);
     return [...review, ...continuous, ...processed];
-  }, [allAnomalyRecords, records, bilgeWaterRecords]);
+  }, [allAnomalyRecords, records, bilgeWaterRecords, anomalyRecords]);
 
   const filteredReminders = useMemo(() => {
     if (activeFilter === "全部") return allReminders;
@@ -284,7 +295,7 @@ export function MaintenanceReminder({
               </div>
               <button
                 className="reminder-goto-btn"
-                onClick={() => onNavigateToHistory(item.category)}
+                onClick={() => onNavigateToHistory(item.category, item.category === "舱底水" ? undefined : item.deviceName)}
               >
                 查看历史记录 →
               </button>

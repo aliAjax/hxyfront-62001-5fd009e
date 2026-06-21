@@ -17,7 +17,7 @@ type DeviceCategory = "主机" | "发电机" | "泵组" | "舱底水";
 
 type PageState =
   | { type: "dashboard" }
-  | { type: "history"; category?: DeviceCategory };
+  | { type: "history"; category?: DeviceCategory; device?: string };
 
 const project = {
   id: "hxyfront-62001",
@@ -250,12 +250,13 @@ function AppContent() {
       <DeviceHistoryPage
         onBack={() => setPage({ type: "dashboard" })}
         initialCategory={page.category}
+        initialDevice={page.device}
       />
     );
   }
 
-  const navigateToHistoryWithCategory = (category: DeviceCategory) => {
-    setPage({ type: "history", category });
+  const navigateToHistoryWithCategory = (category: DeviceCategory, deviceName?: string) => {
+    setPage({ type: "history", category, device: deviceName });
   };
 
   return (

@@ -29,9 +29,18 @@ function getShiftLabel(shiftId: string): string {
   return shift ? shift.label : shiftId;
 }
 
-export function DeviceHistoryPage({ onBack, initialCategory }: { onBack: () => void; initialCategory?: DeviceCategory }) {
+export function DeviceHistoryPage({
+  onBack,
+  initialCategory,
+  initialDevice,
+}: {
+  onBack: () => void;
+  initialCategory?: DeviceCategory;
+  initialDevice?: string;
+}) {
   const { records, allBilgeWaterRecords } = useShift();
   const [activeCategory, setActiveCategory] = useState<DeviceCategory>(initialCategory ?? "主机");
+  const [activeDevice, setActiveDevice] = useState<string | null>(initialDevice ?? null);
 
   useEffect(() => {
     if (initialCategory) {
@@ -39,11 +48,30 @@ export function DeviceHistoryPage({ onBack, initialCategory }: { onBack: () => v
     }
   }, [initialCategory]);
 
+  useEffect(() => {
+    if (initialDevice) {
+      setActiveDevice(initialDevice);
+    } else {
+      setActiveDevice(null);
+    }
+  }, [initialDevice]);
+
   const allRecords: WatchRecord[] = Object.values(records)
     .flat()
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  const filtered = allRecords.filter((r) => matchCategory(r.device, activeCategory));
+  const categoryRecords = allRecords.filter((r) => matchCategory(r.device, activeCategory));
+
+  const deviceNames = useMemo(() => {
+    const names = new Set<string>();
+    categoryRecords.forEach((r) => names.add(r.device));
+    return Array.from(names).sort();
+  }, [categoryRecords]);
+
+  const filtered = useMemo(() => {
+    if (!activeDevice) return categoryRecords;
+    return categoryRecords.filter((r) => r.device === activeDevice);
+  }, [categoryRecords, activeDevice]);
 
   const sortedBilgeRecords: BilgeWaterRecord[] = useMemo(() =>
     [...allBilgeWaterRecords].sort(
@@ -187,10 +215,43 @@ export function DeviceHistoryPage({ onBack, initialCategory }: { onBack: () => v
           <div className="heading">
             <div>
               <p>{activeCategory} · 设备记录</p>
-              <h2>{activeCategory}历史记录</h2>
+              <h2>
+                {activeDevice ? `${activeDevice} · ` : ""}
+                {activeCategory}历史记录
+              </h2>
             </div>
-            <span className="record-count">共 {filtered.length} 条</span>
+            <div className="history-stats-row">
+              <span className="record-count">共 {filtered.length} 条</span>
+              {activeDevice && (
+                <button
+                  className="clear-device-filter-btn"
+                  onClick={() => setActiveDevice(null)}
+                >
+                  清除设备筛选 ×
+                </button>
+              )}
+            </div>
           </div>
+
+          {deviceNames.length > 1 && (
+            <div className="device-chip-filter">
+              <button
+                className={`device-chip${!activeDevice ? " active" : ""}`}
+                onClick={() => setActiveDevice(null)}
+              >
+                全部设备
+              </button>
+              {deviceNames.map((name) => (
+                <button
+                  key={name}
+                  className={`device-chip${activeDevice === name ? " active" : ""}`}
+                  onClick={() => setActiveDevice(name)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
 
           {filtered.length === 0 ? (
             <div className="empty-state">
