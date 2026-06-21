@@ -15,6 +15,8 @@ import {
   type StatusUpdate,
   type HandoverSummary,
   type BilgeWaterRecord,
+  type ExportData,
+  type ImportStrategy,
   SHIFTS,
   loadCurrentShiftId,
   saveCurrentShiftId,
@@ -29,6 +31,9 @@ import {
   getPreviousShiftId,
   loadBilgeWaterRecords,
   saveBilgeWaterRecords,
+  createExportData,
+  downloadExportFile,
+  applyImport,
 } from "./types";
 
 interface ShiftContextValue {
@@ -56,6 +61,9 @@ interface ShiftContextValue {
   currentHandoverSummary: HandoverSummary | null;
   previousShiftSummary: HandoverSummary | null;
   saveHandover: (manualNote: string, isDraft: boolean) => void;
+  exportData: () => void;
+  importData: (data: ExportData, strategy: ImportStrategy) => void;
+  getAllData: () => ExportData;
 }
 
 const ShiftContext = createContext<ShiftContextValue | null>(null);
@@ -315,6 +323,46 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     [currentShiftId, generateAutoSummary, handoverSummaries]
   );
 
+  const getAllData = useCallback((): ExportData => {
+    return createExportData(
+      records,
+      engineRoomRecords,
+      anomalyRecords,
+      bilgeWaterRecords,
+      handoverSummaries
+    );
+  }, [records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries]);
+
+  const exportData = useCallback(() => {
+    const data = getAllData();
+    downloadExportFile(data);
+  }, [getAllData]);
+
+  const importData = useCallback(
+    (data: ExportData, strategy: ImportStrategy) => {
+      const result = applyImport(
+        data,
+        strategy,
+        records,
+        engineRoomRecords,
+        anomalyRecords,
+        bilgeWaterRecords,
+        handoverSummaries
+      );
+      setRecords(result.records);
+      saveAllRecords(result.records);
+      setEngineRoomRecords(result.engineRoomRecords);
+      saveEngineRoomRecords(result.engineRoomRecords);
+      setAnomalyRecords(result.anomalyRecords);
+      saveAnomalyRecords(result.anomalyRecords);
+      setBilgeWaterRecords(result.bilgeWaterRecords);
+      saveBilgeWaterRecords(result.bilgeWaterRecords);
+      setHandoverSummaries(result.handoverSummaries);
+      saveHandoverSummaries(result.handoverSummaries);
+    },
+    [records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries]
+  );
+
   useEffect(() => {
     saveCurrentShiftId(currentShiftId);
   }, [currentShiftId]);
@@ -346,6 +394,9 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         currentHandoverSummary,
         previousShiftSummary,
         saveHandover,
+        exportData,
+        importData,
+        getAllData,
       }}
     >
       {children}

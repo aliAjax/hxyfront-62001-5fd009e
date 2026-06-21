@@ -7,6 +7,7 @@ import { AnomalyTimeline } from "./shifts/AnomalyTimeline";
 import { useShift } from "./shifts/ShiftContext";
 import { ShiftHandover } from "./shifts/ShiftHandover";
 import { BilgeWaterPanel } from "./shifts/BilgeWaterPanel";
+import { DataManager } from "./shifts/DataManager";
 import { getBilgeLevelStatus, isBilgeTreatmentUnfinished } from "./shifts/types";
 
 import { DeviceHistoryPage } from "./shifts/DeviceHistoryPage";
@@ -269,6 +270,8 @@ function AppContent() {
       <AnomalyTimeline />
 
       <ShiftHandover />
+
+      <DataManager />
 
       <HistoryRecords />
     </main>
