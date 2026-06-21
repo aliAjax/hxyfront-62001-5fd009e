@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useShift } from "./ShiftContext";
 import type { WatchRecord } from "./types";
 import type { BilgeWaterRecord } from "./types";
@@ -29,9 +29,15 @@ function getShiftLabel(shiftId: string): string {
   return shift ? shift.label : shiftId;
 }
 
-export function DeviceHistoryPage({ onBack }: { onBack: () => void }) {
+export function DeviceHistoryPage({ onBack, initialCategory }: { onBack: () => void; initialCategory?: DeviceCategory }) {
   const { records, allBilgeWaterRecords } = useShift();
-  const [activeCategory, setActiveCategory] = useState<DeviceCategory>("主机");
+  const [activeCategory, setActiveCategory] = useState<DeviceCategory>(initialCategory ?? "主机");
+
+  useEffect(() => {
+    if (initialCategory) {
+      setActiveCategory(initialCategory);
+    }
+  }, [initialCategory]);
 
   const allRecords: WatchRecord[] = Object.values(records)
     .flat()

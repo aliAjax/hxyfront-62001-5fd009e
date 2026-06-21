@@ -8,11 +8,16 @@ import { useShift } from "./shifts/ShiftContext";
 import { ShiftHandover } from "./shifts/ShiftHandover";
 import { BilgeWaterPanel } from "./shifts/BilgeWaterPanel";
 import { DataManager } from "./shifts/DataManager";
+import { MaintenanceReminder } from "./shifts/MaintenanceReminder";
 import { getBilgeLevelStatus, isBilgeTreatmentUnfinished } from "./shifts/types";
 
 import { DeviceHistoryPage } from "./shifts/DeviceHistoryPage";
 
-type Page = "dashboard" | "history";
+type DeviceCategory = "主机" | "发电机" | "泵组" | "舱底水";
+
+type PageState =
+  | { type: "dashboard" }
+  | { type: "history"; category?: DeviceCategory };
 
 const project = {
   id: "hxyfront-62001",
@@ -177,7 +182,7 @@ function RecordForm() {
   );
 }
 
-function NavAside({ onNavigate }: { onNavigate: (page: Page) => void }) {
+function NavAside({ onNavigate }: { onNavigate: (page: PageState) => void }) {
   return (
     <aside className="panel">
       <h2>{project.domain}导航</h2>
@@ -185,7 +190,7 @@ function NavAside({ onNavigate }: { onNavigate: (page: Page) => void }) {
         {project.filters.map((item) => (
           <button
             key={item}
-            onClick={() => onNavigate("history")}
+            onClick={() => onNavigate({ type: "history", category: item as DeviceCategory })}
           >
             {item}
           </button>
@@ -193,7 +198,7 @@ function NavAside({ onNavigate }: { onNavigate: (page: Page) => void }) {
       </div>
       <button
         className="primary history-nav-btn"
-        onClick={() => onNavigate("history")}
+        onClick={() => onNavigate({ type: "history" })}
       >
         查看设备历史记录 →
       </button>
@@ -238,11 +243,20 @@ function HistoryRecords() {
 
 function AppContent() {
   const { currentShift } = useShift();
-  const [page, setPage] = useState<Page>("dashboard");
+  const [page, setPage] = useState<PageState>({ type: "dashboard" });
 
-  if (page === "history") {
-    return <DeviceHistoryPage onBack={() => setPage("dashboard")} />;
+  if (page.type === "history") {
+    return (
+      <DeviceHistoryPage
+        onBack={() => setPage({ type: "dashboard" })}
+        initialCategory={page.category}
+      />
+    );
   }
+
+  const navigateToHistoryWithCategory = (category: DeviceCategory) => {
+    setPage({ type: "history", category });
+  };
 
   return (
     <main className="app">
@@ -257,6 +271,8 @@ function AppContent() {
       <ShiftSelector />
 
       <Dashboard />
+
+      <MaintenanceReminder onNavigateToHistory={navigateToHistoryWithCategory} />
 
       <EngineRoomPanel />
 
