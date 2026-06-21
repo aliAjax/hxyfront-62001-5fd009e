@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useShift } from "./ShiftContext";
 import { SHIFTS, getPreviousShiftId } from "./types";
 
@@ -18,6 +18,12 @@ export function ShiftHandover() {
   );
   const [savedDraft, setSavedDraft] = useState(false);
   const [savedFinal, setSavedFinal] = useState(false);
+
+  useEffect(() => {
+    setManualNote(currentHandoverSummary?.manualNote ?? "");
+    setSavedDraft(false);
+    setSavedFinal(false);
+  }, [currentShift.id]);
 
   const previousShiftLabel = useMemo(() => {
     const prevId = getPreviousShiftId(currentShift.id);
