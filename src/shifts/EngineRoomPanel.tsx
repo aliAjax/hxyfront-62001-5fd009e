@@ -55,6 +55,7 @@ export function EngineRoomPanel() {
     setErrors((prev) => ({ ...prev, [field]: undefined }));
     setSaved(false);
     setDuplicateWarning(false);
+    setIdempotencyKey(generateIdempotencyKey());
   };
 
   const validate = (): boolean => {
@@ -90,7 +91,6 @@ export function EngineRoomPanel() {
 
     if (result.created) {
       setSaved(true);
-      setIdempotencyKey(generateIdempotencyKey());
       setTimeout(() => setSaved(false), 2000);
     } else {
       setDuplicateWarning(true);

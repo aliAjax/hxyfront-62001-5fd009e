@@ -59,6 +59,7 @@ export function BilgeWaterPanel() {
     setErrors((prev) => ({ ...prev, [field]: undefined }));
     setSaved(false);
     setDuplicateWarning(false);
+    setIdempotencyKey(generateIdempotencyKey());
   };
 
   const validate = (): boolean => {
@@ -116,7 +117,6 @@ export function BilgeWaterPanel() {
       return;
     }
 
-    setIdempotencyKey(generateIdempotencyKey());
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
