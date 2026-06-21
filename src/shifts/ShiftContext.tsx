@@ -22,6 +22,7 @@ import {
   type RiskLevel,
   type RiskTrigger,
   type RiskTimelineEvent,
+  type HandoverStep,
   SHIFTS,
   getPreviousShiftId,
   generateIdempotencyKey,
@@ -33,6 +34,12 @@ import {
   RISK_LEVEL_LABELS,
   RISK_LEVEL_SCORES,
   RISK_LEVEL_ORDER,
+  getAnomalyOriginShiftLabel,
+  getAnomalyCurrentShiftLabel,
+  getAnomalyCloseShiftLabel,
+  getHandoverPathLabels,
+  formatHandoverPath,
+  getAnomalyLifecycleStatus,
 } from "./domain";
 import { getRepository } from "./repository";
 
@@ -86,6 +93,12 @@ interface ShiftContextValue {
   riskLevelLabels: Record<RiskLevel, string>;
   riskLevelScores: Record<RiskLevel, number>;
   riskLevelOrder: RiskLevel[];
+  getAnomalyOriginShiftLabel: (record: AnomalyRecord) => string;
+  getAnomalyCurrentShiftLabel: (record: AnomalyRecord) => string;
+  getAnomalyCloseShiftLabel: (record: AnomalyRecord) => string | null;
+  getHandoverPathLabels: (record: AnomalyRecord) => string[];
+  formatHandoverPath: (record: AnomalyRecord) => string;
+  getAnomalyLifecycleStatus: (record: AnomalyRecord) => "open" | "carried" | "closed" | "reopened";
 }
 
 const ShiftContext = createContext<ShiftContextValue | null>(null);
@@ -455,7 +468,11 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
 
       if (carriedOverList.length > 0) {
         const items = carriedOverList.map(
-          (r, i) => `${i + 1}. ${r.device}（${r.currentStatus}）：${r.anomalyDescription}${r.handoverNote ? " - 备注：" + r.handoverNote : ""}`
+          (r, i) => {
+            const originLabel = getAnomalyOriginShiftLabel(r);
+            const pathStr = formatHandoverPath(r);
+            return `${i + 1}. ${r.device}（${r.currentStatus}）【原始班次：${originLabel}】${pathStr ? `【流转：${pathStr}】` : ""}：${r.anomalyDescription}${r.handoverNote ? " - 备注：" + r.handoverNote : ""}`;
+          }
         );
         parts.push(`\n【跨班次遗留异常·来自上一班】\n${items.join("\n")}`);
       }
@@ -723,6 +740,12 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         riskLevelLabels: RISK_LEVEL_LABELS,
         riskLevelScores: RISK_LEVEL_SCORES,
         riskLevelOrder: RISK_LEVEL_ORDER,
+        getAnomalyOriginShiftLabel,
+        getAnomalyCurrentShiftLabel,
+        getAnomalyCloseShiftLabel,
+        getHandoverPathLabels,
+        formatHandoverPath,
+        getAnomalyLifecycleStatus,
       }}
     >
       {children}

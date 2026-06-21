@@ -7,6 +7,7 @@ import {
   generateIdempotencyKey,
   type AnomalyStatus,
   type AnomalyRecord,
+  type HandoverStep,
 } from "./domain";
 
 interface AnomalyFormData {
@@ -477,6 +478,38 @@ function TimelineCard({
   index: number;
 }) {
   const [showHistory, setShowHistory] = useState(false);
+  const [showHandoverPath, setShowHandoverPath] = useState(false);
+  const {
+    getAnomalyOriginShiftLabel,
+    getAnomalyCurrentShiftLabel,
+    getAnomalyCloseShiftLabel,
+    getHandoverPathLabels,
+    formatHandoverPath,
+    getAnomalyLifecycleStatus,
+  } = useShift();
+
+  const originLabel = getAnomalyOriginShiftLabel(record);
+  const currentLabel = getAnomalyCurrentShiftLabel(record);
+  const closeLabel = getAnomalyCloseShiftLabel(record);
+  const handoverPathLabels = getHandoverPathLabels(record);
+  const handoverPathStr = formatHandoverPath(record);
+  const lifecycleStatus = getAnomalyLifecycleStatus(record);
+  const hasHandoverPath = handoverPathLabels.length > 1;
+
+  const getLifecycleBadge = () => {
+    switch (lifecycleStatus) {
+      case "closed":
+        return { text: "已关闭", className: "lifecycle-badge lifecycle-closed" };
+      case "carried":
+        return { text: "跨班次流转", className: "lifecycle-badge lifecycle-carried" };
+      case "reopened":
+        return { text: "已重新打开", className: "lifecycle-badge lifecycle-reopened" };
+      default:
+        return { text: "本班新增", className: "lifecycle-badge lifecycle-open" };
+    }
+  };
+
+  const lifecycleBadge = getLifecycleBadge();
 
   return (
     <div className="timeline-card">
@@ -488,9 +521,10 @@ function TimelineCard({
           <div className="timeline-title-row">
             <h4 className="timeline-device">{record.device}</h4>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span className={lifecycleBadge.className}>{lifecycleBadge.text}</span>
               {record.isCarriedOver && record.carryOverFromShiftId && (
                 <span className="carryover-tag">
-                  从 {getShiftLabelById(record.carryOverFromShiftId)} 班次遗留
+                  从 {getShiftLabelById(record.carryOverFromShiftId)} 交接
                 </span>
               )}
               <span
@@ -503,15 +537,71 @@ function TimelineCard({
           <div className="timeline-meta">
             <span>{formatDisplay(record.createdAt)}</span>
             <span className="timeline-shift">{record.createdBy}</span>
-            {record.shiftId && (
-              <span className="anomaly-source-tag">
-                {getShiftLabelById(record.shiftId)}
-              </span>
-            )}
           </div>
         </div>
 
         <div className="timeline-body">
+          <div className="lifecycle-info-panel">
+            <div className="lifecycle-row">
+              <div className="lifecycle-item">
+                <span className="lifecycle-label">📍 原始班次</span>
+                <span className="lifecycle-value origin">{originLabel}</span>
+              </div>
+              <div className="lifecycle-item">
+                <span className="lifecycle-label">🔄 当前处理班次</span>
+                <span className="lifecycle-value current">{currentLabel}</span>
+              </div>
+              {closeLabel && (
+                <div className="lifecycle-item">
+                  <span className="lifecycle-label">✅ 关闭班次</span>
+                  <span className="lifecycle-value closed">{closeLabel}</span>
+                </div>
+              )}
+            </div>
+            {hasHandoverPath && (
+              <div className="handover-path-display">
+                <div
+                  className="handover-path-header"
+                  onClick={() => setShowHandoverPath(!showHandoverPath)}
+                >
+                  <span className="handover-path-label">交接路径：{handoverPathStr}</span>
+                  <span className="expand-arrow">{showHandoverPath ? "▲" : "▼"}</span>
+                </div>
+                {showHandoverPath && (
+                  <div className="handover-path-visual">
+                    <div className="handover-path-flow">
+                      {handoverPathLabels.map((label, i) => (
+                        <div key={i} className="handover-path-node">
+                          <div className={`path-node ${i === 0 ? "path-node-origin" : i === handoverPathLabels.length - 1 ? "path-node-current" : "path-node-middle"}`}>
+                            {label}
+                          </div>
+                          {i < handoverPathLabels.length - 1 && (
+                            <div className="path-arrow">→</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {record.handoverPath && record.handoverPath.length > 0 && (
+                      <div className="handover-steps-detail">
+                        <h5 className="handover-steps-title">交接明细</h5>
+                        {record.handoverPath.map((step: HandoverStep, i: number) => (
+                          <div key={step.id} className="handover-step-item">
+                            <span className="step-index">#{i + 1}</span>
+                            <span className="step-shift">
+                              {getShiftLabelById(step.fromShiftId)} → {getShiftLabelById(step.toShiftId)}
+                            </span>
+                            <span className="step-time">{formatDisplay(step.handedAt)}</span>
+                            <span className="step-operator">{step.handedBy}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="info-row">
             <span className="info-label">异常描述</span>
             <span className="info-value anomaly-desc">{record.anomalyDescription}</span>
@@ -534,6 +624,13 @@ function TimelineCard({
               <span className={`status-tag ${getStatusClass(record.initialStatus)}`}>
                 {record.initialStatus}
               </span>
+            </div>
+          )}
+          {record.closedAt && (
+            <div className="info-row">
+              <span className="info-label">关闭时间</span>
+              <span className="info-value">{formatDisplay(record.closedAt)}</span>
+              {record.closedBy && <span className="info-value">· {record.closedBy}</span>}
             </div>
           )}
         </div>
@@ -559,6 +656,9 @@ function TimelineCard({
                         </span>
                         <span className="history-time">{formatDisplay(update.updatedAt)}</span>
                         <span className="history-operator">{update.updatedBy}</span>
+                        {update.shiftId && (
+                          <span className="history-shift">{getShiftLabelById(update.shiftId)}</span>
+                        )}
                       </div>
                       {update.note && (
                         <p className="history-note">{update.note}</p>

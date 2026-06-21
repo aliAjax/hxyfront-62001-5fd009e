@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = "2.1.0";
+export const SCHEMA_VERSION = "3.0.0";
 
 export type RiskLevel = "safe" | "low" | "medium" | "high" | "critical";
 
@@ -185,11 +185,22 @@ export interface StatusUpdate extends WithAudit, WithVessel, WithSoftDelete {
   id: string;
   status: AnomalyStatus;
   note: string;
+  shiftId: string;
+}
+
+export interface HandoverStep {
+  id: string;
+  fromShiftId: string;
+  toShiftId: string;
+  handedAt: string;
+  handedBy: string;
+  note?: string;
 }
 
 export interface AnomalyRecord extends WithAudit, WithVessel, WithSoftDelete, WithIdempotency {
   id: string;
   shiftId: string;
+  originShiftId: string;
   device: string;
   anomalyDescription: string;
   initialStatus: AnomalyStatus;
@@ -197,6 +208,10 @@ export interface AnomalyRecord extends WithAudit, WithVessel, WithSoftDelete, Wi
   reviewTime: string;
   handoverNote: string;
   statusHistory: StatusUpdate[];
+  handoverPath: HandoverStep[];
+  closedAtShiftId?: string | null;
+  closedAt?: string | null;
+  closedBy?: string | null;
   carryOverFromShiftId?: string | null;
   isCarriedOver?: boolean;
 }
@@ -763,12 +778,16 @@ export function buildRiskTimeline(
         : "low"
       : "safe";
     if (level !== "safe") {
+      const originShiftId = r.originShiftId ?? r.shiftId;
+      const originShift = SHIFTS.find((s) => s.id === originShiftId);
+      const originLabel = originShift ? originShift.label : originShiftId;
+      const titleSuffix = originShiftId !== r.shiftId ? `（源自${originLabel}）` : "";
       events.push({
         id: `anomaly-${r.id}`,
         timestamp: r.createdAt,
         type: "anomaly",
         level,
-        title: `${r.device}异常`,
+        title: `${r.device}异常${titleSuffix}`,
         description: r.anomalyDescription,
         linkedRecordId: r.id,
       });
@@ -1116,5 +1135,89 @@ export function applyImport(
     bilgeWaterRecords: mergeArrayMap(importData.bilgeWaterRecords, existingBilge),
     handoverSummaries: mergeObjectMap(importData.handoverSummaries, existingHandover),
     riskAssessments: importData.riskAssessments ? mergeArrayMap(importData.riskAssessments, existingRisk) : { ...existingRisk },
+  };
+}
+
+export function migrateAnomalyRecord(record: AnomalyRecord, targetShiftId?: string): AnomalyRecord {
+  const now = new Date().toISOString();
+  const shifted = targetShiftId ?? record.shiftId;
+  return {
+    ...record,
+    originShiftId: record.originShiftId ?? record.shiftId,
+    handoverPath: record.handoverPath ?? [],
+    closedAtShiftId: record.closedAtShiftId ?? (record.currentStatus === "已关闭" ? shifted : null),
+    closedAt: record.closedAt ?? (record.currentStatus === "已关闭" ? now : null),
+    closedBy: record.closedBy ?? (record.currentStatus === "已关闭" ? record.updatedBy : null),
+    statusHistory: (record.statusHistory ?? []).map((s) => ({
+      ...s,
+      shiftId: s.shiftId ?? shifted,
+    })),
+  };
+}
+
+export function getAnomalyOriginShiftLabel(record: AnomalyRecord): string {
+  const shift = SHIFTS.find((s) => s.id === record.originShiftId);
+  return shift ? shift.label : record.originShiftId;
+}
+
+export function getAnomalyCurrentShiftLabel(record: AnomalyRecord): string {
+  const shift = SHIFTS.find((s) => s.id === record.shiftId);
+  return shift ? shift.label : record.shiftId;
+}
+
+export function getAnomalyCloseShiftLabel(record: AnomalyRecord): string | null {
+  if (!record.closedAtShiftId) return null;
+  const shift = SHIFTS.find((s) => s.id === record.closedAtShiftId);
+  return shift ? shift.label : record.closedAtShiftId;
+}
+
+export function getHandoverPathLabels(record: AnomalyRecord): string[] {
+  const labels: string[] = [];
+  if (record.handoverPath && record.handoverPath.length > 0) {
+    const first = record.handoverPath[0];
+    const fromShift = SHIFTS.find((s) => s.id === first.fromShiftId);
+    labels.push(fromShift ? fromShift.label : first.fromShiftId);
+    record.handoverPath.forEach((step) => {
+      const toShift = SHIFTS.find((s) => s.id === step.toShiftId);
+      labels.push(toShift ? toShift.label : step.toShiftId);
+    });
+  } else if (record.isCarriedOver && record.carryOverFromShiftId) {
+    const fromShift = SHIFTS.find((s) => s.id === record.carryOverFromShiftId);
+    labels.push(fromShift ? fromShift.label : record.carryOverFromShiftId);
+    const currentShift = SHIFTS.find((s) => s.id === record.shiftId);
+    labels.push(currentShift ? currentShift.label : record.shiftId);
+  } else {
+    const originShift = SHIFTS.find((s) => s.id === record.originShiftId);
+    labels.push(originShift ? originShift.label : record.originShiftId);
+  }
+  return labels;
+}
+
+export function formatHandoverPath(record: AnomalyRecord): string {
+  const labels = getHandoverPathLabels(record);
+  if (labels.length <= 1) return "";
+  return labels.join(" → ");
+}
+
+export function getAnomalyLifecycleStatus(record: AnomalyRecord): "open" | "carried" | "closed" | "reopened" {
+  if (record.currentStatus === "已关闭") return "closed";
+  if (record.handoverPath && record.handoverPath.length > 0) return "carried";
+  if (record.isCarriedOver) return "carried";
+  return "open";
+}
+
+export function buildHandoverStep(
+  fromShiftId: string,
+  toShiftId: string,
+  handedBy: string,
+  note?: string
+): HandoverStep {
+  return {
+    id: crypto.randomUUID(),
+    fromShiftId,
+    toShiftId,
+    handedAt: new Date().toISOString(),
+    handedBy,
+    note,
   };
 }

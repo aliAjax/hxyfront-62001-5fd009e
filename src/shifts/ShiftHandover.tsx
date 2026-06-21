@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useShift } from "./ShiftContext";
-import { SHIFTS, getPreviousShiftId, getStatusClass } from "./types";
+import { SHIFTS, getPreviousShiftId, getStatusClass, getAnomalyOriginShiftLabel, formatHandoverPath, getAnomalyCloseShiftLabel } from "./types";
 
 export function ShiftHandover() {
   const {
@@ -124,9 +124,28 @@ export function ShiftHandover() {
                 <ul className="carryover-anomaly-list">
                   {previousShiftCarriedOverAnomalies.map((r) => (
                     <li key={r.id} className="carryover-anomaly-item">
-                      <strong>{r.device}</strong>
-                      <span className={`status-tag ${getStatusClass(r.currentStatus)}`}>{r.currentStatus}</span>
-                      <span>{r.anomalyDescription}</span>
+                      <div className="carryover-anomaly-header">
+                        <strong>{r.device}</strong>
+                        <span className={`status-tag ${getStatusClass(r.currentStatus)}`}>{r.currentStatus}</span>
+                      </div>
+                      <div className="carryover-anomaly-body">
+                        <p className="carryover-anomaly-desc">{r.anomalyDescription}</p>
+                        <div className="carryover-anomaly-meta">
+                          <span className="carryover-origin-tag">
+                            📍 原始：{getAnomalyOriginShiftLabel(r)}
+                          </span>
+                          {formatHandoverPath(r) && (
+                            <span className="carryover-path-tag">
+                              🔄 {formatHandoverPath(r)}
+                            </span>
+                          )}
+                          {getAnomalyCloseShiftLabel(r) && (
+                            <span className="carryover-closed-tag">
+                              ✅ 关闭于：{getAnomalyCloseShiftLabel(r)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </li>
                   ))}
                 </ul>

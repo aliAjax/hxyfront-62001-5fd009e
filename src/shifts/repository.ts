@@ -19,6 +19,8 @@ import {
   saveRiskAssessments,
   calculateRiskAssessment,
   type RiskCalculationInput,
+  migrateAnomalyRecord,
+  buildHandoverStep,
 } from "./domain";
 
 const STORAGE_KEYS = {
@@ -467,7 +469,7 @@ class WatchRepository {
   }
 
   addAnomalyRecord(
-    input: Omit<AnomalyRecord, "id" | "vesselId" | "fleetId" | "deletedAt" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "idempotencyKey" | "initialStatus" | "currentStatus" | "statusHistory" | "carryOverFromShiftId" | "isCarriedOver"> & {
+    input: Omit<AnomalyRecord, "id" | "vesselId" | "fleetId" | "deletedAt" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "idempotencyKey" | "initialStatus" | "currentStatus" | "statusHistory" | "carryOverFromShiftId" | "isCarriedOver" | "originShiftId" | "handoverPath" | "closedAtShiftId" | "closedAt" | "closedBy"> & {
       shiftId: string;
       status: AnomalyStatus;
       idempotencyKey?: string;
@@ -481,17 +483,23 @@ class WatchRepository {
         return { record: existing, created: false };
       }
     }
+    const isClosed = input.status === "已关闭";
     const record: AnomalyRecord = {
       ...input,
       id: crypto.randomUUID(),
       vesselId: null,
       fleetId: null,
       shiftId: input.shiftId,
+      originShiftId: input.shiftId,
       initialStatus: input.status,
       currentStatus: input.status,
       statusHistory: [],
+      handoverPath: [],
       carryOverFromShiftId: null,
       isCarriedOver: false,
+      closedAtShiftId: isClosed ? input.shiftId : null,
+      closedAt: isClosed ? now : null,
+      closedBy: isClosed ? "system" : null,
       createdAt: now,
       createdBy: "system",
       updatedAt: now,
@@ -534,23 +542,29 @@ class WatchRepository {
     for (const shiftId of Object.keys(this.anomalyRecords)) {
       const idx = this.anomalyRecords[shiftId].findIndex((r) => r.id === id && !r.deletedAt);
       if (idx !== -1) {
+        const original = this.anomalyRecords[shiftId][idx];
+        const isClosing = newStatus === "已关闭";
+        const isReopening = original.currentStatus === "已关闭" && newStatus !== "已关闭";
         const statusUpdate: StatusUpdate = {
           id: crypto.randomUUID(),
           status: newStatus,
           note,
+          shiftId: this.currentShiftId,
           createdAt: now,
           createdBy: updatedBy,
           updatedAt: now,
           updatedBy,
           deletedAt: null,
         };
-        const original = this.anomalyRecords[shiftId][idx];
         const updated: AnomalyRecord = {
           ...original,
           currentStatus: newStatus,
           statusHistory: [...original.statusHistory, statusUpdate],
           updatedAt: now,
           updatedBy,
+          closedAtShiftId: isClosing ? this.currentShiftId : isReopening ? null : original.closedAtShiftId,
+          closedAt: isClosing ? now : isReopening ? null : original.closedAt,
+          closedBy: isClosing ? updatedBy : isReopening ? null : original.closedBy,
         };
         this.anomalyRecords[shiftId][idx] = updated;
         this.safeSave(STORAGE_KEYS.ANOMALIES, this.anomalyRecords);
@@ -568,16 +582,18 @@ class WatchRepository {
       for (let i = 0; i < this.anomalyRecords[shiftId].length; i++) {
         const record = this.anomalyRecords[shiftId][i];
         if (anomalyIds.includes(record.id) && !record.deletedAt && record.currentStatus !== "已关闭") {
+          const handoverStep = buildHandoverStep(shiftId, targetShiftId, operator);
           const updated: AnomalyRecord = {
             ...record,
             updatedAt: now,
             updatedBy: operator,
+            handoverPath: [...(record.handoverPath ?? []), handoverStep],
           };
           this.anomalyRecords[shiftId][i] = updated;
           if (!this.anomalyRecords[targetShiftId]) {
             this.anomalyRecords[targetShiftId] = [];
           }
-          const idempotencyKey = `carryover-${record.id}`;
+          const idempotencyKey = `carryover-${record.id}-${targetShiftId}-${now}`;
           const existsInTarget = this.anomalyRecords[targetShiftId].some(
             (r) => !r.deletedAt && r.idempotencyKey === idempotencyKey
           );
@@ -588,6 +604,8 @@ class WatchRepository {
               shiftId: targetShiftId,
               carryOverFromShiftId: shiftId,
               isCarriedOver: true,
+              handoverPath: [...(record.handoverPath ?? []), handoverStep],
+              originShiftId: record.originShiftId ?? record.shiftId,
               createdAt: now,
               createdBy: operator,
               updatedAt: now,
@@ -832,10 +850,10 @@ class WatchRepository {
     const storedVersion = this.safeLoad<string>(STORAGE_KEYS.SCHEMA_VERSION, "");
     if (!storedVersion || storedVersion !== SCHEMA_VERSION) {
       try {
-        const raw = this.safeLoad<Record<string, RiskAssessment[]>>(STORAGE_KEYS.RISK, {});
-        if (raw && typeof raw === "object") {
-          for (const shiftId of Object.keys(raw)) {
-            const list = raw[shiftId];
+        const rawRisk = this.safeLoad<Record<string, RiskAssessment[]>>(STORAGE_KEYS.RISK, {});
+        if (rawRisk && typeof rawRisk === "object") {
+          for (const shiftId of Object.keys(rawRisk)) {
+            const list = rawRisk[shiftId];
             if (Array.isArray(list)) {
               this.riskAssessments[shiftId] = list.map((r) => ({
                 ...r,
@@ -847,6 +865,15 @@ class WatchRepository {
                 timeline: Array.isArray(r.timeline) ? r.timeline : [],
                 dataSnapshot: r.dataSnapshot || { anomalyIds: [] },
               }));
+            }
+          }
+        }
+        const rawAnomalies = this.safeLoad<Record<string, AnomalyRecord[]>>(STORAGE_KEYS.ANOMALIES, {});
+        if (rawAnomalies && typeof rawAnomalies === "object") {
+          for (const shiftId of Object.keys(rawAnomalies)) {
+            const list = rawAnomalies[shiftId];
+            if (Array.isArray(list)) {
+              this.anomalyRecords[shiftId] = list.map((r) => migrateAnomalyRecord(r, shiftId));
             }
           }
         }
@@ -892,6 +919,18 @@ class WatchRepository {
                   timeline: Array.isArray(r.timeline) ? r.timeline : [],
                   dataSnapshot: r.dataSnapshot || { anomalyIds: [] },
                 }));
+              }
+            }
+          }
+          return obj as T;
+        }
+        if (key === STORAGE_KEYS.ANOMALIES) {
+          const obj = parsed as Record<string, AnomalyRecord[]>;
+          if (obj && typeof obj === "object") {
+            for (const shiftId of Object.keys(obj)) {
+              const list = obj[shiftId];
+              if (Array.isArray(list)) {
+                obj[shiftId] = list.map((r) => migrateAnomalyRecord(r, shiftId));
               }
             }
           }

@@ -9,6 +9,9 @@ import {
   getBilgeLevelStatus,
   isBilgeTreatmentUnfinished,
   matchCategory,
+  getAnomalyOriginShiftLabel,
+  getAnomalyCloseShiftLabel,
+  formatHandoverPath,
 } from "./types";
 
 interface FilterCriteria {
@@ -230,35 +233,55 @@ export function DeviceHistoryPage({
         <table className="history-table anomaly-history-table">
           <thead>
             <tr>
-              <th>班次</th>
+              <th>原始班次</th>
+              <th>当前班次</th>
               <th>设备名称</th>
               <th>异常描述</th>
               <th>当前状态</th>
+              <th>交接路径</th>
+              <th>关闭班次</th>
               <th>复查时间</th>
-              <th>时间</th>
+              <th>创建时间</th>
             </tr>
           </thead>
           <tbody>
-            {records.map((record) => (
-              <tr key={record.id}>
-                <td>
-                  <span className="shift-badge">{getShiftLabel(record.shiftId)}</span>
-                </td>
-                <td className="device-name">{record.device}</td>
-                <td className="anomaly-text">{record.anomalyDescription}</td>
-                <td>
-                  <span className={`status-tag ${getStatusClass(record.currentStatus)}`}>
-                    {record.currentStatus}
-                  </span>
-                </td>
-                <td className="time-cell">
-                  {record.reviewTime ? new Date(record.reviewTime).toLocaleString("zh-CN") : "--"}
-                </td>
-                <td className="time-cell">
-                  {new Date(record.createdAt).toLocaleString("zh-CN")}
-                </td>
-              </tr>
-            ))}
+            {records.map((record) => {
+              const closeLabel = getAnomalyCloseShiftLabel(record);
+              const pathStr = formatHandoverPath(record);
+              return (
+                <tr key={record.id}>
+                  <td>
+                    <span className="shift-badge shift-badge-origin">{getAnomalyOriginShiftLabel(record)}</span>
+                  </td>
+                  <td>
+                    <span className="shift-badge">{getShiftLabel(record.shiftId)}</span>
+                  </td>
+                  <td className="device-name">{record.device}</td>
+                  <td className="anomaly-text">{record.anomalyDescription}</td>
+                  <td>
+                    <span className={`status-tag ${getStatusClass(record.currentStatus)}`}>
+                      {record.currentStatus}
+                    </span>
+                  </td>
+                  <td className="path-cell">
+                    {pathStr ? <span className="path-text">{pathStr}</span> : <span className="text-muted">本班次</span>}
+                  </td>
+                  <td>
+                    {closeLabel ? (
+                      <span className="shift-badge shift-badge-closed">{closeLabel}</span>
+                    ) : (
+                      <span className="text-muted">--</span>
+                    )}
+                  </td>
+                  <td className="time-cell">
+                    {record.reviewTime ? new Date(record.reviewTime).toLocaleString("zh-CN") : "--"}
+                  </td>
+                  <td className="time-cell">
+                    {new Date(record.createdAt).toLocaleString("zh-CN")}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
