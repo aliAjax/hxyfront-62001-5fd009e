@@ -184,7 +184,9 @@ export function EngineRoomPanel() {
 
   const computeDiff = (field: keyof EngineRoomForm): { value: number; sign: "up" | "down" | "zero" } | null => {
     if (!comparisonRecord) return null;
-    const current = Number(form[field]);
+    const rawValue = form[field].trim();
+    if (!rawValue) return null;
+    const current = Number(rawValue);
     const prev = comparisonRecord[field as keyof EngineRoomRecord] as number;
     if (isNaN(current) || isNaN(prev)) return null;
     const diff = Number((current - prev).toFixed(2));
