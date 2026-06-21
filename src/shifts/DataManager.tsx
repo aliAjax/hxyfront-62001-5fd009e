@@ -699,6 +699,16 @@ export function DataManager() {
                 </div>
               )}
             </div>
+            {importStep === "confirm" && !importResult && (
+              <div className="dm-confirm-warning">
+                <strong>⚠️ 二次确认</strong>
+                <p>
+                  {strategy === "overwrite"
+                    ? `覆盖导入将替换本地冲突班次的全部数据，此操作不可撤销。共 ${preview?.conflicts.length ?? 0} 处冲突数据将被覆盖。`
+                    : `合并导入将保留本地数据并仅添加新记录，${preview?.conflicts.length ?? 0} 处冲突数据将保留本地版本。`}
+                </p>
+              </div>
+            )}
             <div className="modal-footer">
               <button onClick={handleCloseImportModal}>
                 {importResult?.includes("成功") ? "关闭" : "取消"}
@@ -742,16 +752,6 @@ export function DataManager() {
                 </>
               )}
             </div>
-            {importStep === "confirm" && !importResult && (
-              <div className="dm-confirm-warning">
-                <strong>⚠️ 二次确认</strong>
-                <p>
-                  {strategy === "overwrite"
-                    ? `覆盖导入将替换本地冲突班次的全部数据，此操作不可撤销。共 ${preview?.conflicts.length ?? 0} 处冲突数据将被覆盖。`
-                    : `合并导入将保留本地数据并仅添加新记录，${preview?.conflicts.length ?? 0} 处冲突数据将保留本地版本。`}
-                </p>
-              </div>
-            )}
           </div>
         </div>
       )}

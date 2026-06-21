@@ -951,6 +951,7 @@ input {
   place-items: center;
   z-index: 1000;
   padding: 20px;
+  overflow: auto;
 }
 
 .modal-content {
@@ -958,11 +959,21 @@ input {
   border-radius: 12px;
   width: 100%;
   max-width: 560px;
+  max-height: calc(100vh - 40px);
   box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.data-export-modal,
+.data-import-modal {
+  max-width: 640px;
+  max-height: calc(100vh - 40px);
 }
 
 .modal-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -997,7 +1008,11 @@ input {
 }
 
 .modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px 22px;
+  min-height: 0;
 }
 
 .original-info {
@@ -1021,6 +1036,7 @@ input {
 }
 
 .modal-footer {
+  flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -4835,22 +4851,23 @@ input {
 }
 
 .dm-confirm-warning {
-  padding: 16px 18px;
+  flex-shrink: 0;
+  padding: 14px 18px;
   background: #fef2f2;
   border-top: 2px solid #dc2626;
-  border-radius: 0 0 12px 12px;
+  border-bottom: 1px solid #fecaca;
 }
 
 .dm-confirm-warning strong {
   display: block;
-  font-size: 15px;
+  font-size: 14px;
   color: #991b1b;
   margin-bottom: 6px;
 }
 
 .dm-confirm-warning p {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   color: #7f1d1d;
   line-height: 1.6;
 }
