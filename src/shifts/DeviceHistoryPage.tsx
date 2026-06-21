@@ -83,6 +83,14 @@ export function DeviceHistoryPage({
   const [endDate, setEndDate] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
 
+  const handleResetFilters = () => {
+    setActiveCategory(initialCategory ?? "主机");
+    setSelectedShiftId("");
+    setDeviceSearch(initialDevice ?? "");
+    setStartDate("");
+    setEndDate("");
+  };
+
   useEffect(() => {
     if (initialCategory) {
       setActiveCategory(initialCategory);
@@ -405,6 +413,13 @@ export function DeviceHistoryPage({
             onChange={(e) => setEndDate(e.target.value)}
           />
         </div>
+
+        <button
+          className="reset-filter-btn"
+          onClick={handleResetFilters}
+        >
+          ↺ 重置筛选
+        </button>
 
         <div className="view-toggle">
           <button

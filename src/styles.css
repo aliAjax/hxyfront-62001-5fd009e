@@ -2470,6 +2470,26 @@ input {
   border-color: #dc2626;
 }
 
+.reset-filter-btn {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.reset-filter-btn:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+  border-color: #cbd5e1;
+}
+
 .history-subsection {
   margin-top: 18px;
 }
@@ -2752,7 +2772,8 @@ input {
   .shift-filter-select,
   .device-search-input,
   .date-range-filter,
-  .view-toggle {
+  .view-toggle,
+  .reset-filter-btn {
     width: 100%;
   }
 
