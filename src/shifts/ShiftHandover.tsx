@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useShift } from "./ShiftContext";
-import { SHIFTS, getPreviousShiftId } from "./types";
+import { SHIFTS, getPreviousShiftId, getStatusClass } from "./types";
 
 export function ShiftHandover() {
   const {
@@ -37,20 +37,25 @@ export function ShiftHandover() {
   const previousShiftCarriedOverAnomalies = useMemo(() => {
     const prevId = getPreviousShiftId(currentShift.id);
     if (!prevId) return [];
-    return (anomalyRecords[prevId] ?? []).filter(
-      (r) => !r.deletedAt && r.currentStatus !== "已关闭" && r.isCarriedOver
+    return (anomalyRecords[currentShift.id] ?? []).filter(
+      (r) => !r.deletedAt && r.currentStatus !== "已关闭" && r.isCarriedOver && r.carryOverFromShiftId === prevId
     );
   }, [currentShift.id, anomalyRecords]);
 
+  const [refreshCounter, setRefreshCounter] = useState(0);
+
   const currentAutoSummary = useMemo(() => {
-    const baseSummary = generateAutoSummary(currentShift.id);
-    if (carriedOverAnomalies.length === 0) return baseSummary;
-    const carryoverItems = carriedOverAnomalies.map(
-      (r) => `${r.device}（${r.currentStatus}）：${r.anomalyDescription}`
+    void refreshCounter;
+    return generateAutoSummary(currentShift.id);
+  }, [currentShift.id, generateAutoSummary, refreshCounter]);
+
+  const previousShiftUnclosedAnomalies = useMemo(() => {
+    const prevId = getPreviousShiftId(currentShift.id);
+    if (!prevId) return [];
+    return (anomalyRecords[prevId] ?? []).filter(
+      (r) => !r.deletedAt && r.currentStatus !== "已关闭" && !r.isCarriedOver
     );
-    const carryoverSection = `【跨班次遗留】\n${carryoverItems.join("\n")}`;
-    return `${baseSummary}\n\n${carryoverSection}`;
-  }, [currentShift.id, generateAutoSummary, carriedOverAnomalies]);
+  }, [currentShift.id, anomalyRecords]);
 
   const dataDirty = isDataDirty(currentShift.id);
 
@@ -75,52 +80,87 @@ export function ShiftHandover() {
 
   const draftStatus = currentHandoverSummary?.isDraft ? "草稿" : currentHandoverSummary ? "已确认" : "未保存";
 
+  const hasPreviousShiftInfo = previousShiftSummary ||
+    previousShiftCarriedOverAnomalies.length > 0 ||
+    previousShiftUnclosedAnomalies.length > 0;
+
+  const handleRefresh = () => {
+    setRefreshCounter((c) => c + 1);
+    triggerSyncToast();
+  };
+
   return (
     <section className="handover-module">
       {showSyncToast && (
         <div className="summary-sync-toast">摘要已同步 ✓</div>
       )}
 
-      {previousShiftSummary && (
+      {hasPreviousShiftInfo && (
         <section className="panel handover-previous-panel">
           <div className="heading">
             <div>
               <p>{previousShiftLabel} · 交接遗留</p>
               <h2>上一班交接事项</h2>
             </div>
-            <span className={`handover-status-tag ${previousShiftSummary.isDraft ? "draft" : "confirmed"}`}>
-              {previousShiftSummary.isDraft ? "草稿" : "已确认"}
-            </span>
+            {previousShiftSummary && (
+              <span className={`handover-status-tag ${previousShiftSummary.isDraft ? "draft" : "confirmed"}`}>
+                {previousShiftSummary.isDraft ? "草稿" : "已确认"}
+              </span>
+            )}
+            {!previousShiftSummary && (previousShiftCarriedOverAnomalies.length > 0 || previousShiftUnclosedAnomalies.length > 0) && (
+              <span className="handover-status-tag draft">未生成摘要</span>
+            )}
           </div>
           <div className="handover-summary-block">
-            <div className="summary-section">
-              <h4>自动摘要</h4>
-              <pre className="summary-text">{previousShiftSummary.autoSummary}</pre>
-            </div>
+            {previousShiftSummary && (
+              <div className="summary-section">
+                <h4>自动摘要</h4>
+                <pre className="summary-text">{previousShiftSummary.autoSummary}</pre>
+              </div>
+            )}
             {previousShiftCarriedOverAnomalies.length > 0 && (
               <div className="summary-section">
-                <h4>跨班次遗留异常</h4>
+                <h4>跨班次遗留异常（已带入本班次）</h4>
                 <ul className="carryover-anomaly-list">
                   {previousShiftCarriedOverAnomalies.map((r) => (
                     <li key={r.id} className="carryover-anomaly-item">
                       <strong>{r.device}</strong>
-                      <span className="status-tag status-pending">{r.currentStatus}</span>
+                      <span className={`status-tag ${getStatusClass(r.currentStatus)}`}>{r.currentStatus}</span>
                       <span>{r.anomalyDescription}</span>
                     </li>
                   ))}
                 </ul>
               </div>
             )}
-            {previousShiftSummary.manualNote && (
+            {!previousShiftSummary && previousShiftUnclosedAnomalies.length > 0 && previousShiftCarriedOverAnomalies.length === 0 && (
+              <div className="summary-section">
+                <h4>上一班遗留未关闭异常（注意：尚未选择带入本班次）</h4>
+                <ul className="carryover-anomaly-list">
+                  {previousShiftUnclosedAnomalies.map((r) => (
+                    <li key={r.id} className="carryover-anomaly-item">
+                      <strong>{r.device}</strong>
+                      <span className={`status-tag ${getStatusClass(r.currentStatus)}`}>{r.currentStatus}</span>
+                      <span>{r.anomalyDescription}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="handover-hint">
+                  ⚠ 提示：这些异常来自 {previousShiftLabel}，请在班次切换时选择「遗留并切换」以将其带入本班次。
+                </p>
+              </div>
+            )}
+            {previousShiftSummary?.manualNote && (
               <div className="summary-section">
                 <h4>轮机员备注</h4>
                 <pre className="summary-text manual-note">{previousShiftSummary.manualNote}</pre>
               </div>
             )}
-            <div className="summary-meta">
-              <span>创建时间：{new Date(previousShiftSummary.createdAt).toLocaleString("zh-CN")}</span>
-              <span>更新时间：{new Date(previousShiftSummary.updatedAt).toLocaleString("zh-CN")}</span>
-            </div>
+            {previousShiftSummary && (
+              <div className="summary-meta">
+                <span>创建时间：{new Date(previousShiftSummary.createdAt).toLocaleString("zh-CN")}</span>
+                <span>更新时间：{new Date(previousShiftSummary.updatedAt).toLocaleString("zh-CN")}</span>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -132,6 +172,9 @@ export function ShiftHandover() {
             <h2>生成交接班摘要</h2>
           </div>
           <div className="handover-actions">
+            <button className="secondary-btn refresh-btn" onClick={handleRefresh} title="重新生成摘要">
+              🔄 刷新
+            </button>
             <span className={`handover-status-tag ${draftStatus === "草稿" ? "draft" : draftStatus === "已确认" ? "confirmed" : "unsaved"}`}>
               {draftStatus}
             </span>

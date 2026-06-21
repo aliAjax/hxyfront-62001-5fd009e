@@ -339,59 +339,169 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     (shiftId?: string): string => {
       const targetShift = shiftId ?? currentShiftId;
       const parts: string[] = [];
+      const now = new Date();
+      const timestampStr = now.toLocaleString("zh-CN");
+      const shiftLabel = SHIFTS.find((s) => s.id === targetShift)?.label ?? targetShift;
 
+      parts.push(`═══════════════════════════════`);
+      parts.push(`交接班摘要 - ${shiftLabel}`);
+      parts.push(`生成时间：${timestampStr}`);
+      parts.push(`═══════════════════════════════`);
+
+      const stats: string[] = [];
       const shiftEngineRecords = (engineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftBilgeRecords = (bilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftAllAnomalies = (anomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftAnomalies = shiftAllAnomalies.filter((r) => r.currentStatus !== "已关闭");
+      const shiftAllRecords = (records[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftUnfinishedRecords = shiftAllRecords.filter(
+        (r) => r.status && r.status !== "已解决" && r.status !== "正常巡检"
+      );
+      const carriedOverList = shiftAllAnomalies.filter((r) => r.isCarriedOver);
+
+      stats.push(`机舱参数记录：${shiftEngineRecords.length} 条`);
+      stats.push(`舱底水记录：${shiftBilgeRecords.length} 条`);
+      stats.push(`巡检记录：${shiftAllRecords.length} 条`);
+      stats.push(`异常项：${shiftAllAnomalies.length} 条（未关闭 ${shiftAnomalies.length} 条）`);
+      stats.push(`跨班次遗留：${carriedOverList.length} 条`);
+      parts.push(`\n【班次统计】\n${stats.join("  |  ")}`);
+
       if (shiftEngineRecords.length > 0) {
         const latest = shiftEngineRecords[shiftEngineRecords.length - 1];
+        const engineEvaluations: string[] = [];
+
+        const { mainEngineSpeed, lubricatingOilPressure, coolingWaterTemp, fuelConsumption } = latest;
+        const checkRange = (val: number, range: [number, number]) => val < range[0] || val > range[1];
+
+        if (checkRange(mainEngineSpeed, [600, 950])) {
+          engineEvaluations.push(
+            `⚠ 主机转速 ${mainEngineSpeed} rpm${checkRange(mainEngineSpeed, [500, 1050]) ? "（严重异常）" : "（偏离正常）"}`
+          );
+        }
+        if (checkRange(lubricatingOilPressure, [0.35, 0.6])) {
+          engineEvaluations.push(
+            `⚠ 滑油压力 ${lubricatingOilPressure} MPa${checkRange(lubricatingOilPressure, [0.25, 0.7]) ? "（严重异常）" : "（偏离正常）"}`
+          );
+        }
+        if (checkRange(coolingWaterTemp, [70, 85])) {
+          engineEvaluations.push(
+            `⚠ 冷却水温 ${coolingWaterTemp} ℃${checkRange(coolingWaterTemp, [60, 92]) ? "（严重异常）" : "（偏离正常）"}`
+          );
+        }
+        if (checkRange(fuelConsumption, [15, 35])) {
+          engineEvaluations.push(
+            `⚠ 燃油消耗 ${fuelConsumption} L/h${checkRange(fuelConsumption, [10, 45]) ? "（严重异常）" : "（偏离正常）"}`
+          );
+        }
+
         parts.push(
-          `【机舱参数】主机转速 ${latest.mainEngineSpeed} rpm，滑油压力 ${latest.lubricatingOilPressure} MPa，冷却水温 ${latest.coolingWaterTemp} ℃，燃油消耗 ${latest.fuelConsumption} L/h`
+          `\n【机舱参数读数】\n` +
+          `  主机转速：${mainEngineSpeed} rpm\n` +
+          `  滑油压力：${lubricatingOilPressure} MPa\n` +
+          `  冷却水温：${coolingWaterTemp} ℃\n` +
+          `  燃油消耗：${fuelConsumption} L/h\n` +
+          (engineEvaluations.length > 0
+            ? `  ⚠ 参数异常：\n    ${engineEvaluations.join("\n    ")}`
+            : `  ✓ 所有参数在正常范围内`)
         );
+      } else {
+        parts.push(`\n【机舱参数读数】\n  本班次暂无机舱参数记录`);
       }
 
-      const shiftBilgeRecords = (bilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
       if (shiftBilgeRecords.length > 0) {
         const latest = shiftBilgeRecords[shiftBilgeRecords.length - 1];
-        const levelTag = latest.liquidLevel >= 90 ? "⚠危险" : latest.liquidLevel >= 80 ? "⚠警戒" : "正常";
+        const levelTag = latest.liquidLevel >= 90 ? "⚠危险" : latest.liquidLevel >= 80 ? "⚠警戒" : "✓正常";
         parts.push(
-          `【舱底水状态】液位 ${latest.liquidLevel}%（${levelTag}），泵状态：${latest.pumpStatus}，运行时长：${latest.pumpRunDuration} min，处理结果：${latest.treatmentResult}` +
-          (latest.warningNote ? `，备注：${latest.warningNote}` : "")
+          `\n【舱底水状态】\n` +
+          `  液位：${latest.liquidLevel}%（${levelTag}）\n` +
+          `  泵状态：${latest.pumpStatus}\n` +
+          `  运行时长：${latest.pumpRunDuration} min\n` +
+          `  处理结果：${latest.treatmentResult}` +
+          (latest.warningNote ? `\n  备注：${latest.warningNote}` : "")
         );
+
         const unfinishedBilge = shiftBilgeRecords.filter(
-          (r) => isBilgeTreatmentUnfinished(r.treatmentResult) || r.liquidLevel >= 80
+          (r) => isBilgeTreatmentUnfinished(r.treatmentResult) || r.liquidLevel >= 80 || r.pumpStatus === "故障"
         );
         if (unfinishedBilge.length > 0) {
           const bilgeItems = unfinishedBilge.map(
-            (r, i) => `${i + 1}. 液位 ${r.liquidLevel}%，泵${r.pumpStatus}，处理${r.treatmentResult}${r.warningNote ? "：" + r.warningNote : ""}`
+            (r, i) => {
+              const issues: string[] = [];
+              if (r.liquidLevel >= 90) issues.push("液位危险");
+              else if (r.liquidLevel >= 80) issues.push("液位警戒");
+              if (r.pumpStatus === "故障") issues.push("泵故障");
+              if (isBilgeTreatmentUnfinished(r.treatmentResult)) issues.push(`处理${r.treatmentResult}`);
+              return `${i + 1}. 液位 ${r.liquidLevel}% [${issues.join("，")}]${r.warningNote ? " - " + r.warningNote : ""}`;
+            }
           );
-          parts.push(`【舱底水·需关注】\n${bilgeItems.join("\n")}`);
+          parts.push(`\n【舱底水·需关注事项】\n${bilgeItems.join("\n")}`);
         }
+      } else {
+        parts.push(`\n【舱底水状态】\n  本班次暂无舱底水记录`);
       }
 
-      const shiftAnomalies = (anomalyRecords[targetShift] ?? []).filter(
-        (r) => !r.deletedAt && r.currentStatus !== "已关闭"
-      );
+      if (carriedOverList.length > 0) {
+        const items = carriedOverList.map(
+          (r, i) => `${i + 1}. ${r.device}（${r.currentStatus}）：${r.anomalyDescription}${r.handoverNote ? " - 备注：" + r.handoverNote : ""}`
+        );
+        parts.push(`\n【跨班次遗留异常·来自上一班】\n${items.join("\n")}`);
+      }
+
       if (shiftAnomalies.length > 0) {
-        const items = shiftAnomalies.map(
-          (r) => `${r.device}（${r.currentStatus}）：${r.anomalyDescription}`
+        const grouped: Record<string, AnomalyRecord[]> = {
+          "待处理": [],
+          "处理中": [],
+          "需复查": [],
+        };
+        shiftAnomalies.forEach((r) => {
+          if (!r.isCarriedOver) {
+            if (grouped[r.currentStatus]) {
+              grouped[r.currentStatus].push(r);
+            } else {
+              if (!grouped["其他"]) grouped["其他"] = [];
+              grouped["其他"].push(r);
+            }
+          }
+        });
+
+        const newAnomalyItems: string[] = [];
+        (["待处理", "处理中", "需复查", "其他"] as const).forEach((status) => {
+          if (grouped[status] && grouped[status].length > 0) {
+            grouped[status].forEach((r, i) => {
+              newAnomalyItems.push(`  [${status}] ${r.device}：${r.anomalyDescription}${r.handoverNote ? "（备注：" + r.handoverNote + "）" : ""}`);
+            });
+          }
+        });
+
+        if (newAnomalyItems.length > 0) {
+          parts.push(`\n【异常巡检项·本班次未关闭】\n${newAnomalyItems.join("\n")}`);
+        }
+      } else {
+        parts.push(`\n【异常巡检项】\n  ✓ 本班次无未关闭异常项`);
+      }
+
+      if (shiftUnfinishedRecords.length > 0) {
+        const items = shiftUnfinishedRecords.map(
+          (r, i) => `${i + 1}. ${r.device} [${r.status}]${r.anomaly ? "：" + r.anomaly : ""}${r.handoverNote ? "（交接备注：" + r.handoverNote + "）" : ""}`
         );
-        parts.push(`【异常巡检项·未关闭】\n${items.join("\n")}`);
+        parts.push(`\n【未完成处理事项】\n${items.join("\n")}`);
       }
 
-      const shiftRecords = (records[targetShift] ?? []).filter(
-        (r) => !r.deletedAt && r.status && r.status !== "已解决" && r.status !== "正常巡检"
-      );
-      if (shiftRecords.length > 0) {
-        const items = shiftRecords.map(
-          (r) => `${r.device} - ${r.status}${r.anomaly ? "：" + r.anomaly : ""}`
-        );
-        parts.push(`【未完成处理】\n${items.join("\n")}`);
+      const totalUnfinished = shiftAnomalies.length + shiftUnfinishedRecords.length +
+        shiftBilgeRecords.filter((r) => isBilgeTreatmentUnfinished(r.treatmentResult) || r.liquidLevel >= 80 || r.pumpStatus === "故障").length;
+
+      if (totalUnfinished > 0) {
+        parts.push(`\n═══════════════════════════════`);
+        parts.push(`⚠ 交接提醒：本班次共有 ${totalUnfinished} 项需关注的事项`);
+        parts.push(`  请下一班次轮机员重点处理上述标记项目。`);
+        parts.push(`═══════════════════════════════`);
+      } else {
+        parts.push(`\n═══════════════════════════════`);
+        parts.push(`✓ 本班次运行正常，所有项目已妥善处理。`);
+        parts.push(`═══════════════════════════════`);
       }
 
-      if (parts.length === 0) {
-        parts.push("本班次运行正常，无异常事项需交接。");
-      }
-
-      return parts.join("\n\n");
+      return parts.join("\n");
     },
     [currentShiftId, engineRoomRecords, bilgeWaterRecords, anomalyRecords, records]
   );
