@@ -86,7 +86,7 @@ export function DeviceHistoryPage({
   const handleResetFilters = () => {
     setActiveCategory(initialCategory ?? "主机");
     setSelectedShiftId("");
-    setDeviceSearch(initialDevice ?? "");
+    setDeviceSearch("");
     setStartDate("");
     setEndDate("");
   };
