@@ -15,6 +15,7 @@ const CONFLICT_TYPE_LABELS: Record<ImportConflict["type"], string> = {
   anomalyRecords: "异常巡检记录",
   bilgeWaterRecords: "舱底水记录",
   handoverSummaries: "交接摘要",
+  riskAssessments: "风险评估记录",
 };
 
 function getShiftLabel(shiftId: string): string {
@@ -23,7 +24,7 @@ function getShiftLabel(shiftId: string): string {
 }
 
 export function DataManager() {
-  const { exportData, importData, records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries } = useShift();
+  const { exportData, importData, records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries, riskAssessments } = useShift();
   const [showImportModal, setShowImportModal] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [strategy, setStrategy] = useState<ImportStrategy>("merge");
@@ -40,8 +41,9 @@ export function DataManager() {
       anomalies: sumRecords(anomalyRecords as Record<string, unknown[]>),
       bilge: sumRecords(bilgeWaterRecords as Record<string, unknown[]>),
       handover: Object.keys(handoverSummaries).length,
+      risk: sumRecords(riskAssessments as Record<string, unknown[]>),
     };
-  }, [records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries]);
+  }, [records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries, riskAssessments]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -58,7 +60,8 @@ export function DataManager() {
           engineRoomRecords,
           anomalyRecords,
           bilgeWaterRecords,
-          handoverSummaries
+          handoverSummaries,
+          riskAssessments
         );
       }
       setPreview(result);
@@ -137,9 +140,13 @@ export function DataManager() {
             <small>交接摘要</small>
             <strong>{localStats.handover}</strong>
           </div>
+          <div className="local-stat-item">
+            <small>风险评估</small>
+            <strong>{localStats.risk}</strong>
+          </div>
         </div>
         <small className="data-hint">
-          导出内容包含：班次信息、设备记录、参数读数、异常巡检记录和交接摘要。数据将保存为 JSON 格式文件存储在本地。
+          导出内容包含：班次信息、设备记录、参数读数、异常巡检记录、交接摘要和风险评估。数据将保存为 JSON 格式文件存储在本地。
         </small>
       </section>
 
@@ -215,6 +222,10 @@ export function DataManager() {
                     <div className="preview-stat-item">
                       <small>交接摘要</small>
                       <strong>{preview.stats.totalHandoverSummaries}</strong>
+                    </div>
+                    <div className="preview-stat-item">
+                      <small>风险评估</small>
+                      <strong>{preview.stats.totalRiskAssessments}</strong>
                     </div>
                   </div>
 
