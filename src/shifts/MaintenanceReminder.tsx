@@ -1,34 +1,20 @@
 import { useMemo, useState } from "react";
 import { useShift } from "./ShiftContext";
-import { SHIFTS, getBilgeLevelStatus, isBilgeTreatmentUnfinished } from "./types";
-import type { AnomalyRecord, WatchRecord, BilgeWaterRecord } from "./types";
+import {
+  SHIFTS,
+  DEVICE_CATEGORIES,
+  getBilgeLevelStatus,
+  isBilgeTreatmentUnfinished,
+  getCategoryByDevice,
+} from "./types";
+import type {
+  AnomalyRecord,
+  WatchRecord,
+  BilgeWaterRecord,
+  DeviceCategory,
+} from "./types";
 
-type DeviceCategory = "主机" | "发电机" | "泵组" | "舱底水";
 type ReminderType = "待复查" | "连续异常" | "已处理";
-
-const DEVICE_CATEGORIES: DeviceCategory[] = ["主机", "发电机", "泵组", "舱底水"];
-
-const CATEGORY_KEYWORDS: Record<DeviceCategory, string[]> = {
-  主机: ["主机", "主柴油", "主推进", "main engine"],
-  发电机: ["发电机", "发电", "柴油发电", "generator"],
-  泵组: ["泵", "泵组", "水泵", "油泵", "pump"],
-  舱底水: ["舱底", "舱底水", "压载", "bilge"],
-};
-
-function matchCategory(device: string, category: DeviceCategory): boolean {
-  const name = device.toLowerCase();
-  return CATEGORY_KEYWORDS[category].some((kw) => name.includes(kw.toLowerCase()));
-}
-
-function getCategoryByDevice(device: string): DeviceCategory | null {
-  for (const cat of DEVICE_CATEGORIES) {
-    if (matchCategory(device, cat)) return cat;
-  }
-  return null;
-}
-
-const SHIFT_ORDER: Record<string, number> = {};
-SHIFTS.forEach((s, i) => { SHIFT_ORDER[s.id] = i; });
 
 interface ReminderItem {
   id: string;
@@ -40,6 +26,11 @@ interface ReminderItem {
   latestTime: string;
   consecutiveShifts: number;
 }
+
+const SHIFT_ORDER: Record<string, number> = {};
+SHIFTS.forEach((s, i) => {
+  SHIFT_ORDER[s.id] = i;
+});
 
 function buildReviewReminders(anomalyRecords: AnomalyRecord[]): ReminderItem[] {
   return anomalyRecords
@@ -71,9 +62,10 @@ function buildProcessedReminders(anomalyRecords: AnomalyRecord[]): ReminderItem[
         reminderType: "已处理" as ReminderType,
         anomalyCount: 1,
         latestAnomaly: r.anomalyDescription,
-        latestTime: r.statusHistory.length > 0
-          ? r.statusHistory[r.statusHistory.length - 1].updatedAt
-          : r.createdAt,
+        latestTime:
+          r.statusHistory.length > 0
+            ? r.statusHistory[r.statusHistory.length - 1].updatedAt
+            : r.createdAt,
         consecutiveShifts: 0,
       };
     });
@@ -87,9 +79,17 @@ function buildContinuousAnomalyReminders(
   const reminders: ReminderItem[] = [];
 
   const deviceShiftMap: Record<string, string[]> = {};
-  const deviceAnomalyMap: Record<string, { count: number; latestAnomaly: string; latestTime: string }> = {};
+  const deviceAnomalyMap: Record<
+    string,
+    { count: number; latestAnomaly: string; latestTime: string }
+  > = {};
 
-  const addAnomalyForDevice = (device: string, shiftId: string, anomalyDesc: string, time: string) => {
+  const addAnomalyForDevice = (
+    device: string,
+    shiftId: string,
+    anomalyDesc: string,
+    time: string
+  ) => {
     if (!deviceShiftMap[device]) {
       deviceShiftMap[device] = [];
       deviceAnomalyMap[device] = { count: 0, latestAnomaly: "", latestTime: "" };
@@ -98,7 +98,10 @@ function buildContinuousAnomalyReminders(
       deviceShiftMap[device].push(shiftId);
     }
     deviceAnomalyMap[device].count++;
-    if (!deviceAnomalyMap[device].latestTime || time > deviceAnomalyMap[device].latestTime) {
+    if (
+      !deviceAnomalyMap[device].latestTime ||
+      time > deviceAnomalyMap[device].latestTime
+    ) {
       deviceAnomalyMap[device].latestAnomaly = anomalyDesc;
       deviceAnomalyMap[device].latestTime = time;
     }
@@ -132,7 +135,15 @@ function buildContinuousAnomalyReminders(
         shiftHasBilgeAnomaly = true;
         bilgeAnomalyCount++;
         if (!bilgeLatestTime || r.createdAt > bilgeLatestTime) {
-          bilgeLatestAnomaly = `液位${r.liquidLevel}%${levelStatus !== "normal" ? (levelStatus === "danger" ? "·危险" : "·警戒") : ""}${r.pumpStatus === "故障" ? "·泵故障" : ""}${treatmentUnfinished ? "·处理未完成" : ""}`;
+          bilgeLatestAnomaly = `液位${r.liquidLevel}%${
+            levelStatus !== "normal"
+              ? levelStatus === "danger"
+                ? "·危险"
+                : "·警戒"
+              : ""
+          }${r.pumpStatus === "故障" ? "·泵故障" : ""}${
+            treatmentUnfinished ? "·处理未完成" : ""
+          }`;
           bilgeLatestTime = r.createdAt;
         }
       }
@@ -143,7 +154,9 @@ function buildContinuousAnomalyReminders(
   }
 
   if (bilgeAnomalyShifts.length >= 2) {
-    const sortedShifts = bilgeAnomalyShifts.sort((a, b) => (SHIFT_ORDER[a] ?? 0) - (SHIFT_ORDER[b] ?? 0));
+    const sortedShifts = bilgeAnomalyShifts.sort(
+      (a, b) => (SHIFT_ORDER[a] ?? 0) - (SHIFT_ORDER[b] ?? 0)
+    );
     let maxConsecutive = 1;
     let currentConsecutive = 1;
     for (let i = 1; i < sortedShifts.length; i++) {
@@ -173,7 +186,9 @@ function buildContinuousAnomalyReminders(
   for (const [device, shiftIds] of Object.entries(deviceShiftMap)) {
     if (shiftIds.length < 2) continue;
     const category = getCategoryByDevice(device) ?? "主机";
-    const sortedShifts = shiftIds.sort((a, b) => (SHIFT_ORDER[a] ?? 0) - (SHIFT_ORDER[b] ?? 0));
+    const sortedShifts = shiftIds.sort(
+      (a, b) => (SHIFT_ORDER[a] ?? 0) - (SHIFT_ORDER[b] ?? 0)
+    );
     let maxConsecutive = 1;
     let currentConsecutive = 1;
     for (let i = 1; i < sortedShifts.length; i++) {
@@ -210,13 +225,18 @@ export function MaintenanceReminder({
 }: {
   onNavigateToHistory: (category: DeviceCategory, deviceName?: string) => void;
 }) {
-  const { records, anomalyRecords, allAnomalyRecords, bilgeWaterRecords } = useShift();
+  const { records, anomalyRecords, allAnomalyRecords, bilgeWaterRecords } =
+    useShift();
   const [activeFilter, setActiveFilter] = useState<FilterType>("全部");
 
   const allReminders = useMemo(() => {
     const review = buildReviewReminders(allAnomalyRecords);
     const processed = buildProcessedReminders(allAnomalyRecords);
-    const continuous = buildContinuousAnomalyReminders(records, bilgeWaterRecords, anomalyRecords);
+    const continuous = buildContinuousAnomalyReminders(
+      records,
+      bilgeWaterRecords,
+      anomalyRecords
+    );
     return [...review, ...continuous, ...processed];
   }, [allAnomalyRecords, records, bilgeWaterRecords, anomalyRecords]);
 
@@ -225,12 +245,15 @@ export function MaintenanceReminder({
     return allReminders.filter((r) => r.reminderType === activeFilter);
   }, [allReminders, activeFilter]);
 
-  const counts = useMemo(() => ({
-    all: allReminders.length,
-    review: allReminders.filter((r) => r.reminderType === "待复查").length,
-    continuous: allReminders.filter((r) => r.reminderType === "连续异常").length,
-    processed: allReminders.filter((r) => r.reminderType === "已处理").length,
-  }), [allReminders]);
+  const counts = useMemo(
+    () => ({
+      all: allReminders.length,
+      review: allReminders.filter((r) => r.reminderType === "待复查").length,
+      continuous: allReminders.filter((r) => r.reminderType === "连续异常").length,
+      processed: allReminders.filter((r) => r.reminderType === "已处理").length,
+    }),
+    [allReminders]
+  );
 
   return (
     <section className="panel maintenance-reminder-panel">
@@ -255,10 +278,22 @@ export function MaintenanceReminder({
             onClick={() => setActiveFilter(f)}
           >
             {f}
-            {f === "全部" && counts.all > 0 && <span className="reminder-count-badge">{counts.all}</span>}
-            {f === "待复查" && counts.review > 0 && <span className="reminder-count-badge badge-danger">{counts.review}</span>}
-            {f === "连续异常" && counts.continuous > 0 && <span className="reminder-count-badge badge-warning">{counts.continuous}</span>}
-            {f === "已处理" && counts.processed > 0 && <span className="reminder-count-badge badge-success">{counts.processed}</span>}
+            {f === "全部" && counts.all > 0 && (
+              <span className="reminder-count-badge">{counts.all}</span>
+            )}
+            {f === "待复查" && counts.review > 0 && (
+              <span className="reminder-count-badge badge-danger">{counts.review}</span>
+            )}
+            {f === "连续异常" && counts.continuous > 0 && (
+              <span className="reminder-count-badge badge-warning">
+                {counts.continuous}
+              </span>
+            )}
+            {f === "已处理" && counts.processed > 0 && (
+              <span className="reminder-count-badge badge-success">
+                {counts.processed}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -274,28 +309,53 @@ export function MaintenanceReminder({
           {filteredReminders.map((item) => (
             <div
               key={item.id}
-              className={`reminder-card reminder-type-${item.reminderType === "待复查" ? "review" : item.reminderType === "连续异常" ? "continuous" : "processed"}`}
+              className={`reminder-card reminder-type-${
+                item.reminderType === "待复查"
+                  ? "review"
+                  : item.reminderType === "连续异常"
+                  ? "continuous"
+                  : "processed"
+              }`}
             >
               <div className="reminder-card-header">
-                <span className={`reminder-type-tag type-${item.reminderType === "待复查" ? "review" : item.reminderType === "连续异常" ? "continuous" : "processed"}`}>
+                <span
+                  className={`reminder-type-tag type-${
+                    item.reminderType === "待复查"
+                      ? "review"
+                      : item.reminderType === "连续异常"
+                      ? "continuous"
+                      : "processed"
+                  }`}
+                >
                   {item.reminderType}
                 </span>
                 <span className="reminder-category-tag">{item.category}</span>
-                <span className="reminder-time">{new Date(item.latestTime).toLocaleString("zh-CN")}</span>
+                <span className="reminder-time">
+                  {new Date(item.latestTime).toLocaleString("zh-CN")}
+                </span>
               </div>
               <div className="reminder-card-body">
                 <h4 className="reminder-device-name">{item.deviceName}</h4>
                 <p className="reminder-anomaly-desc">{item.latestAnomaly}</p>
                 <div className="reminder-meta">
-                  <span className="reminder-anomaly-count">异常 {item.anomalyCount} 次</span>
+                  <span className="reminder-anomaly-count">
+                    异常 {item.anomalyCount} 次
+                  </span>
                   {item.consecutiveShifts > 0 && (
-                    <span className="reminder-consecutive">连续 {item.consecutiveShifts} 个班次</span>
+                    <span className="reminder-consecutive">
+                      连续 {item.consecutiveShifts} 个班次
+                    </span>
                   )}
                 </div>
               </div>
               <button
                 className="reminder-goto-btn"
-                onClick={() => onNavigateToHistory(item.category, item.category === "舱底水" ? undefined : item.deviceName)}
+                onClick={() =>
+                  onNavigateToHistory(
+                    item.category,
+                    item.category === "舱底水" ? undefined : item.deviceName
+                  )
+                }
               >
                 查看历史记录 →
               </button>
