@@ -1,5 +1,5 @@
 import "./styles.css";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ShiftProvider } from "./shifts/ShiftContext";
 import { ShiftSelector } from "./shifts/ShiftSelector";
 import { EngineRoomPanel } from "./shifts/EngineRoomPanel";
@@ -10,6 +10,7 @@ import { BilgeWaterPanel } from "./shifts/BilgeWaterPanel";
 import { DataManager } from "./shifts/DataManager";
 import { MaintenanceReminder } from "./shifts/MaintenanceReminder";
 import { getBilgeLevelStatus, isBilgeTreatmentUnfinished } from "./shifts/types";
+import type { WatchRecord } from "./shifts/types";
 
 import { DeviceHistoryPage } from "./shifts/DeviceHistoryPage";
 
@@ -106,8 +107,14 @@ function Dashboard() {
   );
 }
 
-function RecordForm() {
-  const { currentShift, addRecord } = useShift();
+function RecordForm({
+  editingRecord,
+  setEditingRecord,
+}: {
+  editingRecord: WatchRecord | null;
+  setEditingRecord: (record: WatchRecord | null) => void;
+}) {
+  const { currentShift, addRecord, updateRecord } = useShift();
   const [form, setForm] = useState({
     device: "",
     params: "",
@@ -116,31 +123,90 @@ function RecordForm() {
     handoverNote: "",
   });
   const [saved, setSaved] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editingRecord) {
+      setForm({
+        device: editingRecord.device,
+        params: editingRecord.params,
+        anomaly: editingRecord.anomaly,
+        status: editingRecord.status,
+        handoverNote: editingRecord.handoverNote,
+      });
+    }
+  }, [editingRecord]);
 
   const handleChange = (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setSaved(false);
+    setDuplicateWarning(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingRecord(null);
+    setForm({ device: "", params: "", anomaly: "", status: "", handoverNote: "" });
+    setDuplicateWarning(false);
   };
 
   const handleSubmit = () => {
     if (!form.device.trim()) return;
-    addRecord(form);
-    setForm({ device: "", params: "", anomaly: "", status: "", handoverNote: "" });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+
+    if (editingRecord) {
+      updateRecord(editingRecord.id, {
+        device: form.device,
+        params: form.params,
+        anomaly: form.anomaly,
+        status: form.status,
+        handoverNote: form.handoverNote,
+      });
+      setEditingRecord(null);
+      setForm({ device: "", params: "", anomaly: "", status: "", handoverNote: "" });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } else {
+      const newKey = Date.now().toString() + Math.random().toString(36).slice(2);
+      setIdempotencyKey(newKey);
+      const result = addRecord(form);
+      if (!result.created) {
+        setDuplicateWarning(true);
+        setTimeout(() => setDuplicateWarning(false), 3000);
+        return;
+      }
+      setForm({ device: "", params: "", anomaly: "", status: "", handoverNote: "" });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      const refreshKey = Date.now().toString() + Math.random().toString(36).slice(2);
+      setIdempotencyKey(refreshKey);
+    }
   };
 
   return (
-    <section className="panel form-panel">
+    <section className={"panel form-panel" + (editingRecord ? " record-form-editing" : "")}>
       <div className="heading">
         <div>
           <p>{currentShift.label} · 专业字段</p>
-          <h2>新增记录</h2>
+          <h2>{editingRecord ? "编辑记录" : "新增记录"}</h2>
         </div>
-        <button className="primary" onClick={handleSubmit}>
-          {saved ? "已保存 ✓" : "保存记录"}
-        </button>
+        {editingRecord ? (
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button onClick={handleCancelEdit}>取消编辑</button>
+            <button className="primary" onClick={handleSubmit}>
+              {saved ? "已更新 ✓" : "更新记录"}
+            </button>
+          </div>
+        ) : (
+          <button className="primary" onClick={handleSubmit}>
+            {saved ? "已保存 ✓" : "保存记录"}
+          </button>
+        )}
       </div>
+      {duplicateWarning && (
+        <div className="warning-banner" style={{ marginBottom: "16px" }}>
+          <strong>该记录已存在，请勿重复提交</strong>
+        </div>
+      )}
       <div className="field-grid">
         {project.fields.map((field) => {
           const key = field === "设备名称"
@@ -206,8 +272,18 @@ function NavAside({ onNavigate }: { onNavigate: (page: PageState) => void }) {
   );
 }
 
-function HistoryRecords() {
-  const { currentRecords } = useShift();
+function HistoryRecords({
+  setEditingRecord,
+}: {
+  setEditingRecord: (record: WatchRecord) => void;
+}) {
+  const { currentRecords, deleteRecord } = useShift();
+
+  const handleDelete = (id: string) => {
+    if (window.confirm("确定要删除这条记录吗？")) {
+      deleteRecord(id);
+    }
+  };
 
   return (
     <section className="panel">
@@ -225,13 +301,29 @@ function HistoryRecords() {
           currentRecords.map((record, index) => (
             <article key={record.id}>
               <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record.device}</h3>
-                <p>
-                  {record.params}
-                  {record.anomaly && ` · ${record.anomaly}`}
-                  {record.status && ` · ${record.status}`}
-                </p>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: "12px", flex: "1" }}>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    {record.device}
+                    {record.isEdited && (
+                      <span className="record-edit-tag">已编辑</span>
+                    )}
+                  </h3>
+                  <p>
+                    {record.params}
+                    {record.anomaly && ` · ${record.anomaly}`}
+                    {record.status && ` · ${record.status}`}
+                  </p>
+                  {record.isEdited && record.editedAt && (
+                    <small className="record-time">
+                      最后编辑时间：{new Date(record.editedAt).toLocaleString("zh-CN")}
+                    </small>
+                  )}
+                </div>
+                <div className="record-item-actions">
+                  <button className="edit-btn" onClick={() => setEditingRecord(record)}>编辑</button>
+                  <button className="delete-btn" onClick={() => handleDelete(record.id)}>删除</button>
+                </div>
               </div>
             </article>
           ))
@@ -244,6 +336,7 @@ function HistoryRecords() {
 function AppContent() {
   const { currentShift } = useShift();
   const [page, setPage] = useState<PageState>({ type: "dashboard" });
+  const [editingRecord, setEditingRecord] = useState<WatchRecord | null>(null);
 
   if (page.type === "history") {
     return (
@@ -281,7 +374,7 @@ function AppContent() {
 
       <section className="workspace">
         <NavAside onNavigate={setPage} />
-        <RecordForm />
+        <RecordForm editingRecord={editingRecord} setEditingRecord={setEditingRecord} />
       </section>
 
       <AnomalyTimeline />
@@ -290,7 +383,7 @@ function AppContent() {
 
       <DataManager />
 
-      <HistoryRecords />
+      <HistoryRecords setEditingRecord={setEditingRecord} />
     </main>
   );
 }

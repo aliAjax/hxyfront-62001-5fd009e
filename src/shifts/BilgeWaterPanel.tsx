@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useShift } from "./ShiftContext";
 import {
   BILGE_WARNING_LEVEL,
@@ -7,8 +7,10 @@ import {
   BILGE_TREATMENT_OPTIONS,
   getBilgeLevelStatus,
   isBilgeTreatmentUnfinished,
+  generateIdempotencyKey,
   type BilgePumpStatus,
   type BilgeTreatmentResult,
+  type BilgeWaterRecord,
 } from "./types";
 
 const bilgeFields = [
@@ -25,7 +27,7 @@ type BilgeForm = {
 };
 
 export function BilgeWaterPanel() {
-  const { currentShift, latestBilgeWaterRecord, currentBilgeWaterRecords, addBilgeWaterRecord } = useShift();
+  const { currentShift, latestBilgeWaterRecord, currentBilgeWaterRecords, addBilgeWaterRecord, updateBilgeWaterRecord, deleteBilgeWaterRecord } = useShift();
   const [form, setForm] = useState<BilgeForm>({
     liquidLevel: "",
     pumpStatus: "未运行",
@@ -35,8 +37,12 @@ export function BilgeWaterPanel() {
   });
   const [errors, setErrors] = useState<Partial<Record<string, string>>>({});
   const [saved, setSaved] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(generateIdempotencyKey());
+  const [duplicateWarning, setDuplicateWarning] = useState(false);
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (editingRecordId) return;
     if (latestBilgeWaterRecord) {
       setForm({
         liquidLevel: String(latestBilgeWaterRecord.liquidLevel),
@@ -46,12 +52,13 @@ export function BilgeWaterPanel() {
         warningNote: latestBilgeWaterRecord.warningNote,
       });
     }
-  }, [latestBilgeWaterRecord]);
+  }, [latestBilgeWaterRecord, editingRecordId]);
 
   const handleChange = (field: keyof BilgeForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: undefined }));
     setSaved(false);
+    setDuplicateWarning(false);
   };
 
   const validate = (): boolean => {
@@ -80,7 +87,21 @@ export function BilgeWaterPanel() {
   const handleSubmit = () => {
     if (!validate()) return;
 
-    addBilgeWaterRecord({
+    if (editingRecordId) {
+      updateBilgeWaterRecord(editingRecordId, {
+        liquidLevel: Number(form.liquidLevel),
+        pumpStatus: form.pumpStatus,
+        pumpRunDuration: Number(form.pumpRunDuration),
+        treatmentResult: form.treatmentResult,
+        warningNote: form.warningNote.trim(),
+      });
+      setEditingRecordId(null);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      return;
+    }
+
+    const result = addBilgeWaterRecord({
       liquidLevel: Number(form.liquidLevel),
       pumpStatus: form.pumpStatus,
       pumpRunDuration: Number(form.pumpRunDuration),
@@ -88,8 +109,52 @@ export function BilgeWaterPanel() {
       warningNote: form.warningNote.trim(),
     });
 
+    if (!result.created) {
+      setDuplicateWarning(true);
+      setTimeout(() => setDuplicateWarning(false), 3000);
+      return;
+    }
+
+    setIdempotencyKey(generateIdempotencyKey());
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleEdit = (record: BilgeWaterRecord) => {
+    setEditingRecordId(record.id);
+    setForm({
+      liquidLevel: String(record.liquidLevel),
+      pumpStatus: record.pumpStatus,
+      pumpRunDuration: String(record.pumpRunDuration),
+      treatmentResult: record.treatmentResult,
+      warningNote: record.warningNote,
+    });
+    setErrors({});
+    setDuplicateWarning(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingRecordId(null);
+    setErrors({});
+    setDuplicateWarning(false);
+    if (latestBilgeWaterRecord) {
+      setForm({
+        liquidLevel: String(latestBilgeWaterRecord.liquidLevel),
+        pumpStatus: latestBilgeWaterRecord.pumpStatus,
+        pumpRunDuration: String(latestBilgeWaterRecord.pumpRunDuration),
+        treatmentResult: latestBilgeWaterRecord.treatmentResult,
+        warningNote: latestBilgeWaterRecord.warningNote,
+      });
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm("确定要删除这条舱底水记录吗？")) {
+      deleteBilgeWaterRecord(id);
+      if (editingRecordId === id) {
+        setEditingRecordId(null);
+      }
+    }
   };
 
   const levelStatus = latestBilgeWaterRecord
@@ -103,6 +168,12 @@ export function BilgeWaterPanel() {
   const fillPercent = latestBilgeWaterRecord
     ? Math.max(0, Math.min(100, latestBilgeWaterRecord.liquidLevel))
     : 0;
+
+  const sortedRecords = useMemo(() => {
+    return [...currentBilgeWaterRecords].sort((a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }, [currentBilgeWaterRecords]);
 
   return (
     <section className={`panel bilge-water-panel ${needsAttention ? "bilge-alert-panel" : ""}`}>
@@ -207,9 +278,18 @@ export function BilgeWaterPanel() {
         </div>
       </div>
 
-      <div className="bilge-form-divider">
-        <span>录入新记录</span>
+      <div className={`bilge-form-divider ${editingRecordId ? "bilge-history-editing" : ""}`}>
+        <span>{editingRecordId ? "编辑记录" : "录入新记录"}</span>
       </div>
+
+      {duplicateWarning && (
+        <div className="bilge-alert-banner bilge-alert-warning" style={{ marginBottom: "16px" }}>
+          <div className="alert-icon">⚠️</div>
+          <div className="alert-content">
+            <strong>该记录已存在，请勿重复提交</strong>
+          </div>
+        </div>
+      )}
 
       <div className="field-grid">
         {bilgeFields.map((field) => (
@@ -264,16 +344,76 @@ export function BilgeWaterPanel() {
       </div>
 
       <div className="bilge-form-actions">
-        {latestBilgeWaterRecord && (
+        {latestBilgeWaterRecord && !editingRecordId && (
           <small>
             最近录入：{new Date(latestBilgeWaterRecord.createdAt).toLocaleString("zh-CN")}
             {currentBilgeWaterRecords.length > 1 && ` · 本班次共 ${currentBilgeWaterRecords.length} 条记录`}
           </small>
         )}
-        <button className="primary" onClick={handleSubmit}>
-          {saved ? "已保存 ✓" : "保存舱底水记录"}
-        </button>
+        {editingRecordId && (
+          <small>正在编辑记录</small>
+        )}
+        <div style={{ display: "flex", gap: "10px" }}>
+          {editingRecordId && (
+            <button onClick={handleCancelEdit}>取消编辑</button>
+          )}
+          <button className="primary" onClick={handleSubmit}>
+            {saved ? "已保存 ✓" : editingRecordId ? "更新记录" : "保存舱底水记录"}
+          </button>
+        </div>
       </div>
+
+      {sortedRecords.length > 0 && (
+        <div className="bilge-history-list">
+          <div className="bilge-form-divider" style={{ marginTop: "20px" }}>
+            <span>本班次记录历史（{sortedRecords.length}）</span>
+          </div>
+          {sortedRecords.map((record) => {
+            const recLevelStatus = getBilgeLevelStatus(record.liquidLevel);
+            return (
+              <div
+                key={record.id}
+                className={`bilge-history-item ${editingRecordId === record.id ? "bilge-history-editing" : ""}`}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "6px" }}>
+                    <strong className={`bilge-level-value level-${recLevelStatus}`}>
+                      {record.liquidLevel}%
+                      <span className="level-status-tag">
+                        {recLevelStatus === "danger" ? "危险" : recLevelStatus === "warning" ? "警戒" : "正常"}
+                      </span>
+                    </strong>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      <span className={`pump-indicator pump-${record.pumpStatus}`} />
+                      {record.pumpStatus}
+                    </span>
+                    <span>{record.pumpRunDuration} min</span>
+                    <span className={isBilgeTreatmentUnfinished(record.treatmentResult) ? "treatment-unfinished" : "treatment-ok"}>
+                      {record.treatmentResult}
+                    </span>
+                    {record.isEdited && (
+                      <span style={{ fontSize: "11px", color: "#94a3b8" }}>（已编辑）</span>
+                    )}
+                  </div>
+                  {record.warningNote && (
+                    <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
+                      备注：{record.warningNote}
+                    </p>
+                  )}
+                  <small style={{ display: "block", marginTop: "4px", color: "#94a3b8" }}>
+                    {new Date(record.createdAt).toLocaleString("zh-CN")}
+                    {record.editedAt && ` · 编辑于 ${new Date(record.editedAt).toLocaleString("zh-CN")}`}
+                  </small>
+                </div>
+                <div className="bilge-history-actions">
+                  <button className="edit-btn" onClick={() => handleEdit(record)}>编辑</button>
+                  <button className="delete-btn" onClick={() => handleDelete(record.id)}>删除</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

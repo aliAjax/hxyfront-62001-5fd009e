@@ -1,11 +1,12 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useShift } from "./ShiftContext";
 import {
   ANOMALY_STATUS_OPTIONS,
+  SHIFTS,
   getStatusClass,
   type AnomalyStatus,
   type AnomalyRecord,
-} from "./types";
+} from "./domain";
 
 interface AnomalyFormData {
   device: string;
@@ -19,6 +20,19 @@ interface StatusUpdateForm {
   recordId: string;
   newStatus: AnomalyStatus;
   note: string;
+}
+
+interface AnomalyEditForm {
+  device: string;
+  anomalyDescription: string;
+  reviewTime: string;
+  handoverNote: string;
+}
+
+interface ToastMessage {
+  id: string;
+  text: string;
+  type: "info" | "warning" | "success" | "error";
 }
 
 function formatDateTimeLocal(iso: string): string {
@@ -39,10 +53,15 @@ function formatDisplay(iso: string): string {
   });
 }
 
+function getShiftLabelById(shiftId: string): string {
+  const shift = SHIFTS.find((s) => s.id === shiftId);
+  return shift ? shift.label : shiftId;
+}
+
 function AnomalyForm({
   onSubmit,
 }: {
-  onSubmit: (data: AnomalyFormData) => void;
+  onSubmit: (data: AnomalyFormData) => { created: boolean };
 }) {
   const { currentShift } = useShift();
   const [form, setForm] = useState<AnomalyFormData>({
@@ -54,11 +73,13 @@ function AnomalyForm({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
+  const [duplicateError, setDuplicateError] = useState("");
 
   const handleChange = (field: keyof AnomalyFormData, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: undefined }));
     setSaved(false);
+    setDuplicateError("");
   };
 
   const validate = (): boolean => {
@@ -71,7 +92,11 @@ function AnomalyForm({
 
   const handleSubmit = () => {
     if (!validate()) return;
-    onSubmit(form);
+    const result = onSubmit(form);
+    if (!result.created) {
+      setDuplicateError("该异常记录已存在，请勿重复提交");
+      return;
+    }
     setForm({
       device: "",
       anomalyDescription: "",
@@ -80,6 +105,7 @@ function AnomalyForm({
       handoverNote: "",
     });
     setErrors({});
+    setDuplicateError("");
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -95,6 +121,11 @@ function AnomalyForm({
           {saved ? "已提交 ✓" : "提交记录"}
         </button>
       </div>
+      {duplicateError && (
+        <div className="error-banner" style={{ marginBottom: "16px" }}>
+          <strong>{duplicateError}</strong>
+        </div>
+      )}
       <div className="field-grid">
         <label>
           <span>设备名称 *</span>
@@ -246,13 +277,200 @@ function StatusUpdateModal({
   );
 }
 
+function AnomalyEditModal({
+  record,
+  onClose,
+  onSubmit,
+}: {
+  record: AnomalyRecord;
+  onClose: () => void;
+  onSubmit: (recordId: string, patch: Partial<AnomalyEditForm>) => void;
+}) {
+  const [form, setForm] = useState<AnomalyEditForm>({
+    device: record.device,
+    anomalyDescription: record.anomalyDescription,
+    reviewTime: formatDateTimeLocal(record.reviewTime),
+    handoverNote: record.handoverNote,
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const handleChange = (field: keyof AnomalyEditForm, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    setErrors((prev) => ({ ...prev, [field]: undefined }));
+  };
+
+  const validate = (): boolean => {
+    const newErrors: Record<string, string> = {};
+    if (!form.device.trim()) newErrors.device = "请填写设备名称";
+    if (!form.anomalyDescription.trim()) newErrors.anomalyDescription = "请填写异常描述";
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = () => {
+    if (!validate()) return;
+    onSubmit(record.id, {
+      device: form.device.trim(),
+      anomalyDescription: form.anomalyDescription.trim(),
+      reviewTime: form.reviewTime ? new Date(form.reviewTime).toISOString() : "",
+      handoverNote: form.handoverNote.trim(),
+    });
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>编辑异常记录</h3>
+          <button className="modal-close" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="field-grid">
+            <label>
+              <span>设备名称 *</span>
+              <input
+                value={form.device}
+                onChange={(e) => handleChange("device", e.target.value)}
+                className={errors.device ? "input-error" : ""}
+              />
+              {errors.device && <span className="error-text">{errors.device}</span>}
+            </label>
+            <label>
+              <span>复查时间</span>
+              <input
+                type="datetime-local"
+                value={form.reviewTime}
+                onChange={(e) => handleChange("reviewTime", e.target.value)}
+              />
+            </label>
+            <label className="col-span-2">
+              <span>异常描述 *</span>
+              <input
+                value={form.anomalyDescription}
+                onChange={(e) => handleChange("anomalyDescription", e.target.value)}
+                className={errors.anomalyDescription ? "input-error" : ""}
+              />
+              {errors.anomalyDescription && (
+                <span className="error-text">{errors.anomalyDescription}</span>
+              )}
+            </label>
+            <label className="col-span-2">
+              <span>交接备注</span>
+              <input
+                placeholder="需要下一班注意的事项"
+                value={form.handoverNote}
+                onChange={(e) => handleChange("handoverNote", e.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button onClick={onClose}>取消</button>
+          <button className="primary" onClick={handleSubmit}>
+            保存修改
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmModal({
+  title,
+  message,
+  onClose,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>{title}</h3>
+          <button className="modal-close" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <div className="modal-body">
+          <p style={{ margin: 0, color: "#334155", lineHeight: 1.6 }}>{message}</p>
+        </div>
+        <div className="modal-footer">
+          <button onClick={onClose}>取消</button>
+          <button
+            className="primary"
+            style={{ background: "#dc2626", borderColor: "#dc2626" }}
+            onClick={onConfirm}
+          >
+            确认删除
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToastContainer({ toasts }: { toasts: ToastMessage[] }) {
+  if (toasts.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: "20px",
+        right: "20px",
+        zIndex: 9999,
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+      }}
+    >
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className="toast-message"
+          style={{
+            padding: "12px 18px",
+            borderRadius: "8px",
+            background: toast.type === "info" ? "#f0fdfa" : 
+                       toast.type === "warning" ? "#fffbeb" :
+                       toast.type === "error" ? "#fef2f2" : "#f0fdf4",
+            border: `1px solid ${toast.type === "info" ? "#99f6e4" :
+                                toast.type === "warning" ? "#fde68a" :
+                                toast.type === "error" ? "#fecaca" : "#bbf7d0"}`,
+            color: toast.type === "info" ? "#0f766e" :
+                   toast.type === "warning" ? "#92400e" :
+                   toast.type === "error" ? "#991b1b" : "#166534",
+            fontWeight: 600,
+            fontSize: "13px",
+            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
+            animation: "toastSlideIn 0.3s ease",
+          }}
+        >
+          {toast.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TimelineCard({
   record,
   onUpdateStatus,
+  onEdit,
+  onDelete,
   index,
 }: {
   record: AnomalyRecord;
   onUpdateStatus: (record: AnomalyRecord) => void;
+  onEdit: (record: AnomalyRecord) => void;
+  onDelete: (record: AnomalyRecord) => void;
   index: number;
 }) {
   const [showHistory, setShowHistory] = useState(false);
@@ -266,15 +484,27 @@ function TimelineCard({
         <div className="timeline-header">
           <div className="timeline-title-row">
             <h4 className="timeline-device">{record.device}</h4>
-            <span
-              className={`status-tag ${getStatusClass(record.currentStatus)}`}
-            >
-              {record.currentStatus}
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              {record.isCarriedOver && record.carryOverFromShiftId && (
+                <span className="carryover-tag">
+                  从 {getShiftLabelById(record.carryOverFromShiftId)} 班次遗留
+                </span>
+              )}
+              <span
+                className={`status-tag ${getStatusClass(record.currentStatus)}`}
+              >
+                {record.currentStatus}
+              </span>
+            </div>
           </div>
           <div className="timeline-meta">
             <span>{formatDisplay(record.createdAt)}</span>
             <span className="timeline-shift">{record.createdBy}</span>
+            {record.shiftId && (
+              <span className="anomaly-source-tag">
+                {getShiftLabelById(record.shiftId)}
+              </span>
+            )}
           </div>
         </div>
 
@@ -339,6 +569,20 @@ function TimelineCard({
         )}
 
         <div className="timeline-actions">
+          <button className="edit-btn" onClick={() => onEdit(record)}>
+            编辑
+          </button>
+          <button
+            className="delete-btn"
+            onClick={() => onDelete(record)}
+            style={{
+              color: "#dc2626",
+              borderColor: "#fecaca",
+              background: "#fef2f2",
+            }}
+          >
+            删除
+          </button>
           <button className="update-btn" onClick={() => onUpdateStatus(record)}>
             更新状态
           </button>
@@ -376,28 +620,55 @@ function StatsBar({ records }: { records: AnomalyRecord[] }) {
 }
 
 export function AnomalyTimeline() {
-  const { currentShift, allAnomalyRecords, addAnomalyRecord, updateAnomalyStatus } = useShift();
+  const {
+    currentShift,
+    allAnomalyRecords,
+    addAnomalyRecord,
+    updateAnomalyStatus,
+    updateAnomalyRecord,
+    deleteAnomalyRecord,
+  } = useShift();
+
+  const [statusUpdateRecord, setStatusUpdateRecord] = useState<AnomalyRecord | null>(null);
   const [editingRecord, setEditingRecord] = useState<AnomalyRecord | null>(null);
+  const [deletingRecord, setDeletingRecord] = useState<AnomalyRecord | null>(null);
   const [filterStatus, setFilterStatus] = useState<AnomalyStatus | "全部">("全部");
+  const [filterCarriedOver, setFilterCarriedOver] = useState(false);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const showToast = (text: string, type: ToastMessage["type"] = "info") => {
+    const id = crypto.randomUUID();
+    setToasts((prev) => [...prev, { id, text, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
+  };
 
   const sortedRecords = useMemo(() => {
     let records = [...allAnomalyRecords];
     if (filterStatus !== "全部") {
       records = records.filter((r) => r.currentStatus === filterStatus);
     }
+    if (filterCarriedOver) {
+      records = records.filter((r) => r.isCarriedOver);
+    }
     return records.sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
-  }, [allAnomalyRecords, filterStatus]);
+  }, [allAnomalyRecords, filterStatus, filterCarriedOver]);
 
   const handleSubmit = (data: AnomalyFormData) => {
-    addAnomalyRecord({
+    const result = addAnomalyRecord({
       device: data.device.trim(),
       anomalyDescription: data.anomalyDescription.trim(),
       status: data.status,
       reviewTime: data.reviewTime ? new Date(data.reviewTime).toISOString() : "",
       handoverNote: data.handoverNote.trim(),
     });
+    if (result.created) {
+      showToast("交接班摘要将自动更新", "info");
+    }
+    return result;
   };
 
   const handleUpdateStatus = (
@@ -406,10 +677,29 @@ export function AnomalyTimeline() {
     note: string
   ) => {
     updateAnomalyStatus(recordId, newStatus, note.trim(), currentShift.label);
+    showToast("交接班摘要将自动更新", "info");
+  };
+
+  const handleEditSubmit = (
+    recordId: string,
+    patch: Partial<AnomalyEditForm>
+  ) => {
+    updateAnomalyRecord(recordId, patch, currentShift.label);
+    showToast("交接班摘要将自动更新", "info");
+  };
+
+  const handleDelete = () => {
+    if (deletingRecord) {
+      deleteAnomalyRecord(deletingRecord.id, currentShift.label);
+      showToast("交接班摘要将自动更新", "info");
+      setDeletingRecord(null);
+    }
   };
 
   return (
     <section className="anomaly-timeline-module">
+      <ToastContainer toasts={toasts} />
+
       <AnomalyForm onSubmit={handleSubmit} />
 
       <section className="panel timeline-panel">
@@ -418,7 +708,7 @@ export function AnomalyTimeline() {
             <p>异常巡检</p>
             <h2>时间线记录</h2>
           </div>
-          <div className="filter-bar">
+          <div className="filter-bar" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
             <select
               value={filterStatus}
               onChange={(e) =>
@@ -432,6 +722,31 @@ export function AnomalyTimeline() {
                 </option>
               ))}
             </select>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                minHeight: "38px",
+                padding: "0 12px",
+                border: "1px solid var(--border)",
+                borderRadius: "7px",
+                background: "#ffffff",
+                cursor: "pointer",
+                fontSize: "13px",
+                color: filterCarriedOver ? "var(--primary)" : "#475569",
+                fontWeight: filterCarriedOver ? 600 : 400,
+                borderColor: filterCarriedOver ? "var(--primary)" : "var(--border)",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={filterCarriedOver}
+                onChange={(e) => setFilterCarriedOver(e.target.checked)}
+                style={{ width: "auto", minHeight: "auto", margin: 0 }}
+              />
+              仅显示遗留项
+            </label>
           </div>
         </div>
 
@@ -442,7 +757,9 @@ export function AnomalyTimeline() {
             <div className="empty-icon">📋</div>
             暂无异常记录
             <span>
-              {filterStatus !== "全部"
+              {filterCarriedOver
+                ? "暂无跨班次遗留的异常记录"
+                : filterStatus !== "全部"
                 ? `${filterStatus}状态下暂无记录`
                 : "提交第一条异常记录开始追踪"}
             </span>
@@ -454,18 +771,37 @@ export function AnomalyTimeline() {
                 key={record.id}
                 record={record}
                 index={index}
-                onUpdateStatus={setEditingRecord}
+                onUpdateStatus={setStatusUpdateRecord}
+                onEdit={setEditingRecord}
+                onDelete={setDeletingRecord}
               />
             ))}
           </div>
         )}
       </section>
 
-      {editingRecord && (
+      {statusUpdateRecord && (
         <StatusUpdateModal
+          record={statusUpdateRecord}
+          onClose={() => setStatusUpdateRecord(null)}
+          onSubmit={handleUpdateStatus}
+        />
+      )}
+
+      {editingRecord && (
+        <AnomalyEditModal
           record={editingRecord}
           onClose={() => setEditingRecord(null)}
-          onSubmit={handleUpdateStatus}
+          onSubmit={handleEditSubmit}
+        />
+      )}
+
+      {deletingRecord && (
+        <ConfirmModal
+          title="确认删除"
+          message={`确定要删除设备「${deletingRecord.device}」的异常记录吗？此操作不可撤销。`}
+          onClose={() => setDeletingRecord(null)}
+          onConfirm={handleDelete}
         />
       )}
     </section>

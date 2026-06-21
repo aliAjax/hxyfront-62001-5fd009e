@@ -8,10 +8,10 @@ export function ShiftHandover() {
     currentHandoverSummary,
     previousShiftSummary,
     saveHandover,
-    engineRoomRecords,
+    generateAutoSummary,
+    isDataDirty,
+    carriedOverAnomalies,
     anomalyRecords,
-    bilgeWaterRecords,
-    records,
   } = useShift();
 
   const [manualNote, setManualNote] = useState(
@@ -19,6 +19,7 @@ export function ShiftHandover() {
   );
   const [savedDraft, setSavedDraft] = useState(false);
   const [savedFinal, setSavedFinal] = useState(false);
+  const [showSyncToast, setShowSyncToast] = useState(false);
 
   useEffect(() => {
     setManualNote(currentHandoverSummary?.manualNote ?? "");
@@ -33,80 +34,53 @@ export function ShiftHandover() {
     return found ? found.label : "";
   }, [currentShift.id]);
 
-  const autoSummary = useMemo(() => {
-    const parts: string[] = [];
-    const shiftId = currentShift.id;
-
-    const shiftRecords = engineRoomRecords[shiftId] ?? [];
-    if (shiftRecords.length > 0) {
-      const latest = shiftRecords[shiftRecords.length - 1];
-      parts.push(
-        `【机舱参数】主机转速 ${latest.mainEngineSpeed} rpm，滑油压力 ${latest.lubricatingOilPressure} MPa，冷却水温 ${latest.coolingWaterTemp} ℃，燃油消耗 ${latest.fuelConsumption} L/h`
-      );
-    }
-
-    const shiftBilgeRecords = bilgeWaterRecords[shiftId] ?? [];
-    if (shiftBilgeRecords.length > 0) {
-      const latest = shiftBilgeRecords[shiftBilgeRecords.length - 1];
-      const levelTag = latest.liquidLevel >= 90 ? "⚠危险" : latest.liquidLevel >= 80 ? "⚠警戒" : "正常";
-      parts.push(
-        `【舱底水状态】液位 ${latest.liquidLevel}%（${levelTag}），泵状态：${latest.pumpStatus}，运行时长：${latest.pumpRunDuration} min，处理结果：${latest.treatmentResult}` +
-        (latest.warningNote ? `，备注：${latest.warningNote}` : "")
-      );
-      const unfinishedBilge = shiftBilgeRecords.filter(
-        (r) => r.treatmentResult === "未处理" || r.treatmentResult === "处理中" || r.treatmentResult === "待分离" || r.treatmentResult === "异常" || r.liquidLevel >= 80
-      );
-      if (unfinishedBilge.length > 0) {
-        const bilgeItems = unfinishedBilge.map(
-          (r, i) => `${i + 1}. 液位 ${r.liquidLevel}%，泵${r.pumpStatus}，处理${r.treatmentResult}${r.warningNote ? "：" + r.warningNote : ""}`
-        );
-        parts.push(`【舱底水·需关注】\n${bilgeItems.join("\n")}`);
-      }
-    }
-
-    const shiftAnomalies = (anomalyRecords[shiftId] ?? []).filter(
-      (r) => r.currentStatus !== "已关闭"
+  const previousShiftCarriedOverAnomalies = useMemo(() => {
+    const prevId = getPreviousShiftId(currentShift.id);
+    if (!prevId) return [];
+    return (anomalyRecords[prevId] ?? []).filter(
+      (r) => !r.deletedAt && r.currentStatus !== "已关闭" && r.isCarriedOver
     );
-    if (shiftAnomalies.length > 0) {
-      const items = shiftAnomalies.map(
-        (r) => `${r.device}（${r.currentStatus}）：${r.anomalyDescription}`
-      );
-      parts.push(`【异常巡检项·未关闭】\n${items.join("\n")}`);
-    }
+  }, [currentShift.id, anomalyRecords]);
 
-    const unfinishedRecords = (records[shiftId] ?? []).filter(
-      (r) => r.status && r.status !== "已解决" && r.status !== "正常巡检"
+  const currentAutoSummary = useMemo(() => {
+    const baseSummary = generateAutoSummary(currentShift.id);
+    if (carriedOverAnomalies.length === 0) return baseSummary;
+    const carryoverItems = carriedOverAnomalies.map(
+      (r) => `${r.device}（${r.currentStatus}）：${r.anomalyDescription}`
     );
-    if (unfinishedRecords.length > 0) {
-      const items = unfinishedRecords.map(
-        (r) => `${r.device} - ${r.status}${r.anomaly ? "：" + r.anomaly : ""}`
-      );
-      parts.push(`【未完成处理】\n${items.join("\n")}`);
-    }
+    const carryoverSection = `【跨班次遗留】\n${carryoverItems.join("\n")}`;
+    return `${baseSummary}\n\n${carryoverSection}`;
+  }, [currentShift.id, generateAutoSummary, carriedOverAnomalies]);
 
-    if (parts.length === 0) {
-      parts.push("本班次运行正常，无异常事项需交接。");
-    }
+  const dataDirty = isDataDirty(currentShift.id);
 
-    return parts.join("\n\n");
-  }, [currentShift.id, engineRoomRecords, bilgeWaterRecords, anomalyRecords, records]);
+  const triggerSyncToast = () => {
+    setShowSyncToast(true);
+    setTimeout(() => setShowSyncToast(false), 2000);
+  };
 
   const handleSaveDraft = () => {
     saveHandover(manualNote, true);
     setSavedDraft(true);
     setTimeout(() => setSavedDraft(false), 2000);
+    triggerSyncToast();
   };
 
   const handleSaveFinal = () => {
     saveHandover(manualNote, false);
     setSavedFinal(true);
     setTimeout(() => setSavedFinal(false), 2000);
+    triggerSyncToast();
   };
 
   const draftStatus = currentHandoverSummary?.isDraft ? "草稿" : currentHandoverSummary ? "已确认" : "未保存";
 
   return (
     <section className="handover-module">
+      {showSyncToast && (
+        <div className="summary-sync-toast">摘要已同步 ✓</div>
+      )}
+
       {previousShiftSummary && (
         <section className="panel handover-previous-panel">
           <div className="heading">
@@ -123,6 +97,20 @@ export function ShiftHandover() {
               <h4>自动摘要</h4>
               <pre className="summary-text">{previousShiftSummary.autoSummary}</pre>
             </div>
+            {previousShiftCarriedOverAnomalies.length > 0 && (
+              <div className="summary-section">
+                <h4>跨班次遗留异常</h4>
+                <ul className="carryover-anomaly-list">
+                  {previousShiftCarriedOverAnomalies.map((r) => (
+                    <li key={r.id} className="carryover-anomaly-item">
+                      <strong>{r.device}</strong>
+                      <span className="status-tag status-pending">{r.currentStatus}</span>
+                      <span>{r.anomalyDescription}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {previousShiftSummary.manualNote && (
               <div className="summary-section">
                 <h4>轮机员备注</h4>
@@ -158,8 +146,13 @@ export function ShiftHandover() {
 
         <div className="handover-summary-block">
           <div className="summary-section">
-            <h4>自动生成摘要</h4>
-            <pre className="summary-text">{autoSummary}</pre>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "8px" }}>
+              <h4 style={{ margin: 0 }}>自动生成摘要</h4>
+              {dataDirty && (
+                <span className="summary-dirty-indicator">数据已变更，摘要待更新</span>
+              )}
+            </div>
+            <pre className="summary-text">{currentAutoSummary}</pre>
           </div>
 
           <div className="summary-section">

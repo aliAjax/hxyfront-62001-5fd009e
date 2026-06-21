@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useShift } from "./ShiftContext";
+import { generateIdempotencyKey, type EngineRoomRecord } from "./domain";
 
 const engineRoomFields = [
   { key: "mainEngineSpeed", label: "主机转速", unit: "rpm", placeholder: "请输入主机转速" },
@@ -16,7 +17,15 @@ type EngineRoomForm = {
 };
 
 export function EngineRoomPanel() {
-  const { currentShift, latestEngineRoomRecord, addEngineRoomRecord } = useShift();
+  const {
+    currentShift,
+    latestEngineRoomRecord,
+    currentEngineRoomRecords,
+    addEngineRoomRecord,
+    updateEngineRoomRecord,
+    deleteEngineRoomRecord,
+  } = useShift();
+
   const [form, setForm] = useState<EngineRoomForm>({
     mainEngineSpeed: "",
     lubricatingOilPressure: "",
@@ -25,8 +34,12 @@ export function EngineRoomPanel() {
   });
   const [errors, setErrors] = useState<Partial<Record<keyof EngineRoomForm, string>>>({});
   const [saved, setSaved] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState(generateIdempotencyKey());
+  const [editingRecord, setEditingRecord] = useState<EngineRoomRecord | null>(null);
 
   useEffect(() => {
+    if (editingRecord) return;
     if (latestEngineRoomRecord) {
       setForm({
         mainEngineSpeed: String(latestEngineRoomRecord.mainEngineSpeed),
@@ -35,12 +48,13 @@ export function EngineRoomPanel() {
         fuelConsumption: String(latestEngineRoomRecord.fuelConsumption),
       });
     }
-  }, [latestEngineRoomRecord]);
+  }, [latestEngineRoomRecord, editingRecord]);
 
   const handleChange = (field: keyof EngineRoomForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: undefined }));
     setSaved(false);
+    setDuplicateWarning(false);
   };
 
   const validate = (): boolean => {
@@ -65,27 +79,114 @@ export function EngineRoomPanel() {
   const handleSubmit = () => {
     if (!validate()) return;
 
-    addEngineRoomRecord({
+    const payload = {
       mainEngineSpeed: Number(form.mainEngineSpeed),
       lubricatingOilPressure: Number(form.lubricatingOilPressure),
       coolingWaterTemp: Number(form.coolingWaterTemp),
       fuelConsumption: Number(form.fuelConsumption),
-    });
+    };
 
+    const result = addEngineRoomRecord(payload);
+
+    if (result.created) {
+      setSaved(true);
+      setIdempotencyKey(generateIdempotencyKey());
+      setTimeout(() => setSaved(false), 2000);
+    } else {
+      setDuplicateWarning(true);
+      setTimeout(() => setDuplicateWarning(false), 3000);
+    }
+  };
+
+  const handleEdit = (record: EngineRoomRecord) => {
+    setEditingRecord(record);
+    setForm({
+      mainEngineSpeed: String(record.mainEngineSpeed),
+      lubricatingOilPressure: String(record.lubricatingOilPressure),
+      coolingWaterTemp: String(record.coolingWaterTemp),
+      fuelConsumption: String(record.fuelConsumption),
+    });
+    setErrors({});
+    setSaved(false);
+    setDuplicateWarning(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingRecord(null);
+    setErrors({});
+    setSaved(false);
+    setDuplicateWarning(false);
+    if (latestEngineRoomRecord) {
+      setForm({
+        mainEngineSpeed: String(latestEngineRoomRecord.mainEngineSpeed),
+        lubricatingOilPressure: String(latestEngineRoomRecord.lubricatingOilPressure),
+        coolingWaterTemp: String(latestEngineRoomRecord.coolingWaterTemp),
+        fuelConsumption: String(latestEngineRoomRecord.fuelConsumption),
+      });
+    } else {
+      setForm({
+        mainEngineSpeed: "",
+        lubricatingOilPressure: "",
+        coolingWaterTemp: "",
+        fuelConsumption: "",
+      });
+    }
+  };
+
+  const handleUpdate = () => {
+    if (!editingRecord || !validate()) return;
+
+    const patch = {
+      mainEngineSpeed: Number(form.mainEngineSpeed),
+      lubricatingOilPressure: Number(form.lubricatingOilPressure),
+      coolingWaterTemp: Number(form.coolingWaterTemp),
+      fuelConsumption: Number(form.fuelConsumption),
+    };
+
+    updateEngineRoomRecord(editingRecord.id, patch);
+    setEditingRecord(null);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+
+  const handleDelete = (record: EngineRoomRecord) => {
+    if (!window.confirm(`确认删除该记录吗？\n录入时间：${new Date(record.createdAt).toLocaleString("zh-CN")}`)) {
+      return;
+    }
+    deleteEngineRoomRecord(record.id);
+    if (editingRecord?.id === record.id) {
+      handleCancelEdit();
+    }
+  };
+
+  const sortedRecords = [...currentEngineRoomRecords].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  const formTitle = editingRecord ? "编辑记录" : "参数录入";
+  const submitButtonText = editingRecord
+    ? saved
+      ? "已更新 ✓"
+      : "更新记录"
+    : saved
+    ? "已保存 ✓"
+    : "保存参数";
 
   return (
     <section className="panel engine-room-panel">
       <div className="heading">
         <div>
           <p>{currentShift.label} · 机舱参数</p>
-          <h2>参数录入</h2>
+          <h2>{formTitle}</h2>
         </div>
-        <button className="primary" onClick={handleSubmit}>
-          {saved ? "已保存 ✓" : "保存参数"}
-        </button>
+        <div style={{ display: "flex", gap: "10px" }}>
+          {editingRecord && (
+            <button onClick={handleCancelEdit}>取消编辑</button>
+          )}
+          <button className="primary" onClick={editingRecord ? handleUpdate : handleSubmit}>
+            {submitButtonText}
+          </button>
+        </div>
       </div>
       <div className="field-grid">
         {engineRoomFields.map((field) => (
@@ -105,12 +206,100 @@ export function EngineRoomPanel() {
           </label>
         ))}
       </div>
-      {latestEngineRoomRecord && (
+      {duplicateWarning && (
+        <div style={{ marginTop: "12px", padding: "10px 14px", borderRadius: "6px", background: "#fef3c7", color: "#92400e", fontSize: "13px", fontWeight: 500 }}>
+          该记录已存在，请勿重复提交
+        </div>
+      )}
+      {latestEngineRoomRecord && !editingRecord && (
         <div className="last-record">
           <small>
             最近录入时间：
             {new Date(latestEngineRoomRecord.createdAt).toLocaleString("zh-CN")}
           </small>
+        </div>
+      )}
+
+      {sortedRecords.length > 0 && (
+        <div className="engine-room-history" style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid var(--border)" }}>
+          <h3 style={{ margin: "0 0 14px", fontSize: "15px", color: "#1e293b" }}>本班次记录</h3>
+          <div style={{ display: "grid", gap: "12px" }}>
+            {sortedRecords.map((record) => (
+              <div
+                key={record.id}
+                className={`er-record-item ${editingRecord?.id === record.id ? "er-record-editing" : ""}`}
+                style={{
+                  padding: "14px",
+                  border: "1px solid var(--border)",
+                  borderRadius: "8px",
+                  background: editingRecord?.id === record.id ? "color-mix(in srgb, var(--primary) 6%, #ffffff)" : "#fbfdff",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 18px", marginBottom: "6px" }}>
+                      <div style={{ fontSize: "13px" }}>
+                        <span style={{ color: "#64748b" }}>主机转速：</span>
+                        <strong style={{ color: "#1e293b" }}>{record.mainEngineSpeed} rpm</strong>
+                      </div>
+                      <div style={{ fontSize: "13px" }}>
+                        <span style={{ color: "#64748b" }}>滑油压力：</span>
+                        <strong style={{ color: "#1e293b" }}>{record.lubricatingOilPressure} MPa</strong>
+                      </div>
+                      <div style={{ fontSize: "13px" }}>
+                        <span style={{ color: "#64748b" }}>冷却水温：</span>
+                        <strong style={{ color: "#1e293b" }}>{record.coolingWaterTemp} ℃</strong>
+                      </div>
+                      <div style={{ fontSize: "13px" }}>
+                        <span style={{ color: "#64748b" }}>燃油消耗：</span>
+                        <strong style={{ color: "#1e293b" }}>{record.fuelConsumption} L/h</strong>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>
+                      录入时间：{new Date(record.createdAt).toLocaleString("zh-CN")}
+                      {record.isEdited && record.editedAt && (
+                        <span style={{ marginLeft: "10px" }}>
+                          · 已编辑 · 最后编辑：{new Date(record.editedAt).toLocaleString("zh-CN")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="er-record-actions" style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                    <button
+                      onClick={() => handleEdit(record)}
+                      style={{
+                        minHeight: "32px",
+                        padding: "0 12px",
+                        fontSize: "12px",
+                        color: "var(--primary)",
+                        border: "1px solid var(--primary)",
+                        background: "#ffffff",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      编辑
+                    </button>
+                    <button
+                      onClick={() => handleDelete(record)}
+                      style={{
+                        minHeight: "32px",
+                        padding: "0 12px",
+                        fontSize: "12px",
+                        color: "#dc2626",
+                        border: "1px solid #dc2626",
+                        background: "#ffffff",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </section>
