@@ -1678,5 +1678,9 @@ export function getRepository(): WatchRepository {
   return repositoryInstance;
 }
 
+export function resetRepositoryInstance(): void {
+  repositoryInstance = null;
+}
+
 export { WatchRepository };
 export type { WatchRepositoryState, RepositoryEvent };
