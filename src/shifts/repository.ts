@@ -1260,13 +1260,31 @@ class WatchRepository {
 
   checkAndMigrate(): void {
     const storedVersion = this.safeLoad<string>(STORAGE_KEYS.SCHEMA_VERSION, "");
-    if (!storedVersion || storedVersion !== SCHEMA_VERSION) {
+
+    const dataLooksLegacy = (): boolean => {
+      const topKeys = [
+        ...Object.keys(this.records),
+        ...Object.keys(this.engineRoomRecords),
+        ...Object.keys(this.anomalyRecords),
+        ...Object.keys(this.bilgeWaterRecords),
+        ...Object.keys(this.handoverSummaries),
+        ...Object.keys(this.riskAssessments),
+      ];
+      if (topKeys.length === 0) return false;
+      const hasVesselKey = topKeys.some((k) => k === DEFAULT_VESSEL_ID || k.length > 20);
+      const hasShiftKey = topKeys.some((k) => /^\d{2}-\d{2}$/.test(k));
+      return hasShiftKey && !hasVesselKey;
+    };
+
+    const needsMigration = !storedVersion || storedVersion !== SCHEMA_VERSION || dataLooksLegacy();
+
+    if (needsMigration) {
       try {
         this.migrateFromLegacyFormat();
 
         for (const vId of Object.keys(this.riskAssessments)) {
           const rawRisk = this.riskAssessments[vId];
-          if (rawRisk && typeof rawRisk === "object") {
+          if (rawRisk && typeof rawRisk === "object" && !Array.isArray(rawRisk)) {
             for (const shiftId of Object.keys(rawRisk)) {
               const list = rawRisk[shiftId];
               if (Array.isArray(list)) {
@@ -1287,7 +1305,7 @@ class WatchRepository {
 
         for (const vId of Object.keys(this.anomalyRecords)) {
           const rawAnomalies = this.anomalyRecords[vId];
-          if (rawAnomalies && typeof rawAnomalies === "object") {
+          if (rawAnomalies && typeof rawAnomalies === "object" && !Array.isArray(rawAnomalies)) {
             for (const shiftId of Object.keys(rawAnomalies)) {
               const list = rawAnomalies[shiftId];
               if (Array.isArray(list)) {
@@ -1313,152 +1331,317 @@ class WatchRepository {
 
   private migrateFromLegacyFormat(): void {
     try {
-      const LEGACY_KEYS = {
-        RECORDS: "watch-records",
-        ENGINE_ROOM: "engine-room-records",
-        ANOMALIES: "anomaly-inspection-records",
-        BILGE: "bilge-water-records",
-        HANDOVER: "handover-summaries",
-        RISK: "risk-assessments",
+      this.ensureVesselData(DEFAULT_VESSEL_ID);
+
+      const isShiftScopedArrayData = (data: Record<string, unknown>): boolean => {
+        const keys = Object.keys(data);
+        if (keys.length === 0) return false;
+        return keys.every((k) => {
+          const val = data[k];
+          return Array.isArray(val);
+        });
       };
 
-      const tryLoadLegacy = <T>(key: string): T | null => {
-        try {
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            const keys = Object.keys(parsed);
-            const isVesselScoped = keys.every((k) => {
-              const val = parsed[k];
-              return typeof val === "object" && val !== null && !Array.isArray(val);
-            });
-            const isShiftScoped = keys.length > 0 && Object.values(parsed).every((v: unknown) => Array.isArray(v) || (typeof v === "object" && v !== null && !(v as Record<string, unknown>).id === undefined));
-            if (isShiftScoped && !isVesselScoped) {
-              return parsed as T;
-            }
+      const isShiftScopedObjectData = (data: Record<string, unknown>): boolean => {
+        const keys = Object.keys(data);
+        if (keys.length === 0) return false;
+        return keys.every((k) => {
+          const val = data[k];
+          return typeof val === "object" && val !== null && !Array.isArray(val) && "id" in (val as Record<string, unknown>);
+        });
+      };
+
+      const isVesselScopedData = (data: Record<string, unknown>): boolean => {
+        const keys = Object.keys(data);
+        if (keys.length === 0) return false;
+        return keys.every((k) => {
+          const val = data[k];
+          return typeof val === "object" && val !== null && !Array.isArray(val);
+        });
+      };
+
+      const extractShiftScopedKeys = (data: Record<string, unknown>): string[] => {
+        const result: string[] = [];
+        for (const key of Object.keys(data)) {
+          const val = data[key];
+          if (Array.isArray(val)) {
+            result.push(key);
+          } else if (typeof val === "object" && val !== null && "id" in (val as Record<string, unknown>)) {
+            result.push(key);
           }
-        } catch {}
-        return null;
+        }
+        return result;
       };
 
-      const legacyRecords = tryLoadLegacy<Record<string, WatchRecord[]>>(LEGACY_KEYS.RECORDS);
-      const legacyEngine = tryLoadLegacy<Record<string, EngineRoomRecord[]>>(LEGACY_KEYS.ENGINE_ROOM);
-      const legacyAnomalies = tryLoadLegacy<Record<string, AnomalyRecord[]>>(LEGACY_KEYS.ANOMALIES);
-      const legacyBilge = tryLoadLegacy<Record<string, BilgeWaterRecord[]>>(LEGACY_KEYS.BILGE);
-      const legacyHandover = tryLoadLegacy<Record<string, HandoverSummary>>(LEGACY_KEYS.HANDOVER);
-      const legacyRisk = tryLoadLegacy<Record<string, RiskAssessment[]>>(LEGACY_KEYS.RISK);
+      const migrateArrayData = (
+        target: Record<string, Record<string, any[]>>,
+        shiftScopedData: Record<string, any[]>,
+        extraFields: Record<string, unknown> = {}
+      ): void => {
+        Object.entries(shiftScopedData).forEach(([shiftId, arr]) => {
+          const migratedArr = arr.map((r) => ({
+            ...r,
+            ...extraFields,
+            vesselId: r.vesselId || DEFAULT_VESSEL_ID,
+            fleetId: r.fleetId ?? null,
+          }));
+          if (target[DEFAULT_VESSEL_ID][shiftId]) {
+            const existing = target[DEFAULT_VESSEL_ID][shiftId];
+            const newItems = migratedArr.filter(
+              (nr) => !existing.some((er) => er.id === nr.id)
+            );
+            target[DEFAULT_VESSEL_ID][shiftId] = [...existing, ...newItems];
+          } else {
+            target[DEFAULT_VESSEL_ID][shiftId] = migratedArr;
+          }
+        });
+      };
 
-      const hasLegacy = legacyRecords || legacyEngine || legacyAnomalies || legacyBilge || legacyHandover || legacyRisk;
-      if (!hasLegacy) return;
+      const migrateObjectData = (
+        target: Record<string, Record<string, any>>,
+        shiftScopedData: Record<string, any>,
+        extraFields: Record<string, unknown> = {}
+      ): void => {
+        Object.entries(shiftScopedData).forEach(([shiftId, item]) => {
+          if (!target[DEFAULT_VESSEL_ID][shiftId]) {
+            target[DEFAULT_VESSEL_ID][shiftId] = {
+              ...item,
+              ...extraFields,
+              vesselId: item.vesselId || DEFAULT_VESSEL_ID,
+              fleetId: item.fleetId ?? null,
+            };
+          }
+        });
+      };
 
-      const currentVesselIsDefaultOnly =
-        Object.keys(this.records).length === 0 &&
-        Object.keys(this.engineRoomRecords).length === 0 &&
-        Object.keys(this.anomalyRecords).length === 0 &&
-        Object.keys(this.bilgeWaterRecords).length === 0 &&
-        Object.keys(this.handoverSummaries).length === 0 &&
-        Object.keys(this.riskAssessments).length === 0;
+      const migrateLoadedData = (): boolean => {
+        let migrated = false;
 
-      if (currentVesselIsDefaultOnly) {
-        this.ensureVesselData(DEFAULT_VESSEL_ID);
-        if (legacyRecords) {
-          Object.entries(legacyRecords).forEach(([shiftId, arr]) => {
-            const migratedArr = arr.map((r) => ({
-              ...r,
-              vesselId: DEFAULT_VESSEL_ID,
-              fleetId: r.fleetId ?? null,
-            }));
-            if (this.records[DEFAULT_VESSEL_ID][shiftId]) {
-              this.records[DEFAULT_VESSEL_ID][shiftId] = [
-                ...this.records[DEFAULT_VESSEL_ID][shiftId],
-                ...migratedArr.filter((nr) => !this.records[DEFAULT_VESSEL_ID][shiftId].some((er) => er.id === nr.id)),
-              ];
-            } else {
-              this.records[DEFAULT_VESSEL_ID][shiftId] = migratedArr;
+        if (isShiftScopedArrayData(this.records as unknown as Record<string, unknown>)) {
+          const shiftScopedData = { ...this.records } as unknown as Record<string, WatchRecord[]>;
+          const shiftKeys = Object.keys(shiftScopedData);
+          this.records = { [DEFAULT_VESSEL_ID]: {} };
+          this.ensureVesselData(DEFAULT_VESSEL_ID);
+          migrateArrayData(this.records, shiftScopedData);
+          migrated = true;
+          console.log(`[Migration] Migrated ${shiftKeys.length} shifts of watch records to default vessel`);
+        } else {
+          const shiftKeys = extractShiftScopedKeys(this.records as unknown as Record<string, unknown>);
+          if (shiftKeys.length > 0 && this.records[DEFAULT_VESSEL_ID]) {
+            const shiftScopedData: Record<string, WatchRecord[]> = {};
+            for (const k of shiftKeys) {
+              shiftScopedData[k] = (this.records as unknown as Record<string, WatchRecord[]>)[k];
+              delete this.records[k as keyof typeof this.records];
             }
-          });
+            migrateArrayData(this.records, shiftScopedData);
+            migrated = true;
+            console.log(`[Migration] Migrated ${shiftKeys.length} shifts of watch records (mixed) to default vessel`);
+          }
         }
-        if (legacyEngine) {
-          Object.entries(legacyEngine).forEach(([shiftId, arr]) => {
-            const migratedArr = arr.map((r) => ({
-              ...r,
-              vesselId: DEFAULT_VESSEL_ID,
-              fleetId: r.fleetId ?? null,
-            }));
-            if (this.engineRoomRecords[DEFAULT_VESSEL_ID][shiftId]) {
-              this.engineRoomRecords[DEFAULT_VESSEL_ID][shiftId] = [
-                ...this.engineRoomRecords[DEFAULT_VESSEL_ID][shiftId],
-                ...migratedArr.filter((nr) => !this.engineRoomRecords[DEFAULT_VESSEL_ID][shiftId].some((er) => er.id === nr.id)),
-              ];
-            } else {
-              this.engineRoomRecords[DEFAULT_VESSEL_ID][shiftId] = migratedArr;
+
+        if (isShiftScopedArrayData(this.engineRoomRecords as unknown as Record<string, unknown>)) {
+          const shiftScopedData = { ...this.engineRoomRecords } as unknown as Record<string, EngineRoomRecord[]>;
+          const shiftKeys = Object.keys(shiftScopedData);
+          this.engineRoomRecords = { [DEFAULT_VESSEL_ID]: {} };
+          this.ensureVesselData(DEFAULT_VESSEL_ID);
+          migrateArrayData(this.engineRoomRecords, shiftScopedData);
+          migrated = true;
+          console.log(`[Migration] Migrated ${shiftKeys.length} shifts of engine room records to default vessel`);
+        } else {
+          const shiftKeys = extractShiftScopedKeys(this.engineRoomRecords as unknown as Record<string, unknown>);
+          if (shiftKeys.length > 0 && this.engineRoomRecords[DEFAULT_VESSEL_ID]) {
+            const shiftScopedData: Record<string, EngineRoomRecord[]> = {};
+            for (const k of shiftKeys) {
+              shiftScopedData[k] = (this.engineRoomRecords as unknown as Record<string, EngineRoomRecord[]>)[k];
+              delete this.engineRoomRecords[k as keyof typeof this.engineRoomRecords];
             }
-          });
+            migrateArrayData(this.engineRoomRecords, shiftScopedData);
+            migrated = true;
+          }
         }
-        if (legacyAnomalies) {
-          Object.entries(legacyAnomalies).forEach(([shiftId, arr]) => {
-            const migratedArr = arr.map((r) => ({
+
+        if (isShiftScopedArrayData(this.anomalyRecords as unknown as Record<string, unknown>)) {
+          const shiftScopedData = { ...this.anomalyRecords } as unknown as Record<string, AnomalyRecord[]>;
+          const shiftKeys = Object.keys(shiftScopedData);
+          this.anomalyRecords = { [DEFAULT_VESSEL_ID]: {} };
+          this.ensureVesselData(DEFAULT_VESSEL_ID);
+          const migratedMap: Record<string, AnomalyRecord[]> = {};
+          for (const [shiftId, arr] of Object.entries(shiftScopedData)) {
+            migratedMap[shiftId] = arr.map((r) => ({
               ...migrateAnomalyRecord(r, shiftId),
               vesselId: DEFAULT_VESSEL_ID,
               fleetId: r.fleetId ?? null,
             }));
+          }
+          for (const [shiftId, arr] of Object.entries(migratedMap)) {
             if (this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId]) {
-              this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId] = [
-                ...this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId],
-                ...migratedArr.filter((nr) => !this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId].some((er) => er.id === nr.id)),
-              ];
+              this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId] = [...this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId], ...arr];
             } else {
-              this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId] = migratedArr;
+              this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId] = arr;
             }
-          });
-        }
-        if (legacyBilge) {
-          Object.entries(legacyBilge).forEach(([shiftId, arr]) => {
-            const migratedArr = arr.map((r) => ({
-              ...r,
-              vesselId: DEFAULT_VESSEL_ID,
-              fleetId: r.fleetId ?? null,
-            }));
-            if (this.bilgeWaterRecords[DEFAULT_VESSEL_ID][shiftId]) {
-              this.bilgeWaterRecords[DEFAULT_VESSEL_ID][shiftId] = [
-                ...this.bilgeWaterRecords[DEFAULT_VESSEL_ID][shiftId],
-                ...migratedArr.filter((nr) => !this.bilgeWaterRecords[DEFAULT_VESSEL_ID][shiftId].some((er) => er.id === nr.id)),
-              ];
-            } else {
-              this.bilgeWaterRecords[DEFAULT_VESSEL_ID][shiftId] = migratedArr;
-            }
-          });
-        }
-        if (legacyHandover) {
-          Object.entries(legacyHandover).forEach(([shiftId, summary]) => {
-            if (!this.handoverSummaries[DEFAULT_VESSEL_ID][shiftId]) {
-              this.handoverSummaries[DEFAULT_VESSEL_ID][shiftId] = {
-                ...summary,
+          }
+          migrated = true;
+          console.log(`[Migration] Migrated ${shiftKeys.length} shifts of anomaly records to default vessel`);
+        } else {
+          const shiftKeys = extractShiftScopedKeys(this.anomalyRecords as unknown as Record<string, unknown>);
+          if (shiftKeys.length > 0 && this.anomalyRecords[DEFAULT_VESSEL_ID]) {
+            for (const k of shiftKeys) {
+              const arr = (this.anomalyRecords as unknown as Record<string, AnomalyRecord[]>)[k];
+              const migratedArr = arr.map((r) => ({
+                ...migrateAnomalyRecord(r, k),
                 vesselId: DEFAULT_VESSEL_ID,
-                fleetId: summary.fleetId ?? null,
-              };
+                fleetId: r.fleetId ?? null,
+              }));
+              if (this.anomalyRecords[DEFAULT_VESSEL_ID][k]) {
+                this.anomalyRecords[DEFAULT_VESSEL_ID][k] = [
+                  ...this.anomalyRecords[DEFAULT_VESSEL_ID][k],
+                  ...migratedArr.filter((nr) => !this.anomalyRecords[DEFAULT_VESSEL_ID][k].some((er) => er.id === nr.id)),
+                ];
+              } else {
+                this.anomalyRecords[DEFAULT_VESSEL_ID][k] = migratedArr;
+              }
+              delete this.anomalyRecords[k as keyof typeof this.anomalyRecords];
             }
-          });
+            migrated = true;
+          }
         }
-        if (legacyRisk) {
-          Object.entries(legacyRisk).forEach(([shiftId, arr]) => {
-            const migratedArr = arr.map((r) => ({
-              ...r,
-              vesselId: DEFAULT_VESSEL_ID,
-              fleetId: r.fleetId ?? null,
-            }));
-            if (this.riskAssessments[DEFAULT_VESSEL_ID][shiftId]) {
-              this.riskAssessments[DEFAULT_VESSEL_ID][shiftId] = [
-                ...this.riskAssessments[DEFAULT_VESSEL_ID][shiftId],
-                ...migratedArr.filter((nr) => !this.riskAssessments[DEFAULT_VESSEL_ID][shiftId].some((er) => er.id === nr.id)),
-              ];
-            } else {
-              this.riskAssessments[DEFAULT_VESSEL_ID][shiftId] = migratedArr;
+
+        if (isShiftScopedArrayData(this.bilgeWaterRecords as unknown as Record<string, unknown>)) {
+          const shiftScopedData = { ...this.bilgeWaterRecords } as unknown as Record<string, BilgeWaterRecord[]>;
+          const shiftKeys = Object.keys(shiftScopedData);
+          this.bilgeWaterRecords = { [DEFAULT_VESSEL_ID]: {} };
+          this.ensureVesselData(DEFAULT_VESSEL_ID);
+          migrateArrayData(this.bilgeWaterRecords, shiftScopedData);
+          migrated = true;
+          console.log(`[Migration] Migrated ${shiftKeys.length} shifts of bilge water records to default vessel`);
+        } else {
+          const shiftKeys = extractShiftScopedKeys(this.bilgeWaterRecords as unknown as Record<string, unknown>);
+          if (shiftKeys.length > 0 && this.bilgeWaterRecords[DEFAULT_VESSEL_ID]) {
+            const shiftScopedData: Record<string, BilgeWaterRecord[]> = {};
+            for (const k of shiftKeys) {
+              shiftScopedData[k] = (this.bilgeWaterRecords as unknown as Record<string, BilgeWaterRecord[]>)[k];
+              delete this.bilgeWaterRecords[k as keyof typeof this.bilgeWaterRecords];
             }
-          });
+            migrateArrayData(this.bilgeWaterRecords, shiftScopedData);
+            migrated = true;
+          }
+        }
+
+        if (isShiftScopedObjectData(this.handoverSummaries as unknown as Record<string, unknown>)) {
+          const shiftScopedData = { ...this.handoverSummaries } as unknown as Record<string, HandoverSummary>;
+          const shiftKeys = Object.keys(shiftScopedData);
+          this.handoverSummaries = { [DEFAULT_VESSEL_ID]: {} };
+          this.ensureVesselData(DEFAULT_VESSEL_ID);
+          migrateObjectData(this.handoverSummaries, shiftScopedData);
+          migrated = true;
+          console.log(`[Migration] Migrated ${shiftKeys.length} shifts of handover summaries to default vessel`);
+        } else {
+          const shiftKeys = extractShiftScopedKeys(this.handoverSummaries as unknown as Record<string, unknown>);
+          if (shiftKeys.length > 0 && this.handoverSummaries[DEFAULT_VESSEL_ID]) {
+            const shiftScopedData: Record<string, HandoverSummary> = {};
+            for (const k of shiftKeys) {
+              shiftScopedData[k] = (this.handoverSummaries as unknown as Record<string, HandoverSummary>)[k];
+              delete this.handoverSummaries[k as keyof typeof this.handoverSummaries];
+            }
+            migrateObjectData(this.handoverSummaries, shiftScopedData);
+            migrated = true;
+          }
+        }
+
+        if (isShiftScopedArrayData(this.riskAssessments as unknown as Record<string, unknown>)) {
+          const shiftScopedData = { ...this.riskAssessments } as unknown as Record<string, RiskAssessment[]>;
+          const shiftKeys = Object.keys(shiftScopedData);
+          this.riskAssessments = { [DEFAULT_VESSEL_ID]: {} };
+          this.ensureVesselData(DEFAULT_VESSEL_ID);
+          migrateArrayData(this.riskAssessments, shiftScopedData);
+          migrated = true;
+          console.log(`[Migration] Migrated ${shiftKeys.length} shifts of risk assessments to default vessel`);
+        } else {
+          const shiftKeys = extractShiftScopedKeys(this.riskAssessments as unknown as Record<string, unknown>);
+          if (shiftKeys.length > 0 && this.riskAssessments[DEFAULT_VESSEL_ID]) {
+            const shiftScopedData: Record<string, RiskAssessment[]> = {};
+            for (const k of shiftKeys) {
+              shiftScopedData[k] = (this.riskAssessments as unknown as Record<string, RiskAssessment[]>)[k];
+              delete this.riskAssessments[k as keyof typeof this.riskAssessments];
+            }
+            migrateArrayData(this.riskAssessments, shiftScopedData);
+            migrated = true;
+          }
+        }
+
+        return migrated;
+      };
+
+      const loadedMigrated = migrateLoadedData();
+
+      if (!loadedMigrated) {
+        try {
+          const tryLoadShiftScoped = <T>(key: string): T | null => {
+            try {
+              const raw = localStorage.getItem(key);
+              if (!raw) return null;
+              const parsed = JSON.parse(raw);
+              if (!parsed || typeof parsed !== "object") return null;
+              const isArrayType = isShiftScopedArrayData(parsed);
+              const isObjectType = isShiftScopedObjectData(parsed);
+              const isVesselType = isVesselScopedData(parsed);
+              if ((isArrayType || isObjectType) && !isVesselType) {
+                return parsed as T;
+              }
+            } catch {}
+            return null;
+          };
+
+          const legacyRecords = tryLoadShiftScoped<Record<string, WatchRecord[]>>(STORAGE_KEYS.RECORDS);
+          const legacyEngine = tryLoadShiftScoped<Record<string, EngineRoomRecord[]>>(STORAGE_KEYS.ENGINE_ROOM);
+          const legacyAnomalies = tryLoadShiftScoped<Record<string, AnomalyRecord[]>>(STORAGE_KEYS.ANOMALIES);
+          const legacyBilge = tryLoadShiftScoped<Record<string, BilgeWaterRecord[]>>(STORAGE_KEYS.BILGE);
+          const legacyHandover = tryLoadShiftScoped<Record<string, HandoverSummary>>(STORAGE_KEYS.HANDOVER);
+          const legacyRisk = tryLoadShiftScoped<Record<string, RiskAssessment[]>>(STORAGE_KEYS.RISK);
+
+          if (legacyRecords) {
+            migrateArrayData(this.records, legacyRecords);
+            console.log(`[Migration] Loaded legacy records from localStorage`);
+          }
+          if (legacyEngine) {
+            migrateArrayData(this.engineRoomRecords, legacyEngine);
+          }
+          if (legacyAnomalies) {
+            const migratedMap: Record<string, AnomalyRecord[]> = {};
+            for (const [shiftId, arr] of Object.entries(legacyAnomalies)) {
+              migratedMap[shiftId] = arr.map((r) => ({
+                ...migrateAnomalyRecord(r, shiftId),
+                vesselId: DEFAULT_VESSEL_ID,
+                fleetId: r.fleetId ?? null,
+              }));
+            }
+            for (const [shiftId, arr] of Object.entries(migratedMap)) {
+              if (this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId]) {
+                this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId] = [
+                  ...this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId],
+                  ...arr.filter((nr) => !this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId].some((er) => er.id === nr.id)),
+                ];
+              } else {
+                this.anomalyRecords[DEFAULT_VESSEL_ID][shiftId] = arr;
+              }
+            }
+          }
+          if (legacyBilge) {
+            migrateArrayData(this.bilgeWaterRecords, legacyBilge);
+          }
+          if (legacyHandover) {
+            migrateObjectData(this.handoverSummaries, legacyHandover);
+          }
+          if (legacyRisk) {
+            migrateArrayData(this.riskAssessments, legacyRisk);
+          }
+        } catch (e) {
+          console.warn("[Migration] Legacy key loading skipped:", e);
         }
       }
-    } catch {}
+    } catch (e) {
+      console.error("[Migration] Unexpected error:", e);
+    }
   }
 
   private safeLoad<T>(key: string, defaultValue: T): T {
