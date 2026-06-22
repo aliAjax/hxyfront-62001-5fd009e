@@ -20,6 +20,10 @@ interface WithCreatedAt {
   createdAt: string;
 }
 
+interface WithCalculatedAt {
+  calculatedAt: string;
+}
+
 export function selectVesselShiftMap<T>(
   vesselScoped: VesselScoped<ShiftMap<T>>,
   vesselId: string
@@ -185,4 +189,31 @@ export function findIdempotencyKeyInVessel<T extends { idempotencyKey: string }>
   return null;
 }
 
-export type { VesselScoped, ShiftMap, ShiftObject, SoftDeletable, WithCreatedAt };
+export function selectLatestRiskAssessment(
+  records: RiskAssessment[]
+): RiskAssessment | null {
+  if (records.length === 0) return null;
+  return records.reduce((latest, record) =>
+    new Date(record.calculatedAt) > new Date(latest.calculatedAt) ? record : latest
+  );
+}
+
+export function selectLatestVesselRiskAssessment(
+  vesselScoped: VesselScoped<ShiftMap<RiskAssessment>>,
+  vesselId: string
+): RiskAssessment | null {
+  const shiftMap = selectVesselShiftMap(vesselScoped, vesselId);
+  const all = selectAllActiveRecords(shiftMap);
+  return selectLatestRiskAssessment(all);
+}
+
+export function selectCurrentShiftLatestRiskAssessment(
+  vesselScoped: VesselScoped<ShiftMap<RiskAssessment>>,
+  vesselId: string,
+  shiftId: string
+): RiskAssessment | null {
+  const records = selectCurrentShiftActiveRecords(vesselScoped, vesselId, shiftId);
+  return selectLatestRiskAssessment(records);
+}
+
+export type { VesselScoped, ShiftMap, ShiftObject, SoftDeletable, WithCreatedAt, WithCalculatedAt };

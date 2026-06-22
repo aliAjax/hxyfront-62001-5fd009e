@@ -31,6 +31,8 @@ import {
   selectVesselShiftMap,
   selectActiveRecords,
   selectLatestRecord,
+  selectLatestRiskAssessment,
+  selectCurrentShiftLatestRiskAssessment,
   findIdempotencyKeyInVessel,
   type VesselScoped,
   type ShiftMap,
@@ -935,8 +937,12 @@ class WatchRepository {
   }
 
   getLatestRiskAssessment(shiftId?: string, vesselId?: string): RiskAssessment | null {
-    const list = this.listRiskAssessments(shiftId, vesselId);
-    return selectLatestRecord(list);
+    const vId = vesselId ?? this.currentVesselId;
+    if (shiftId) {
+      return selectCurrentShiftLatestRiskAssessment(this.riskAssessments, vId, shiftId);
+    }
+    const list = this.listRiskAssessments(undefined, vId);
+    return selectLatestRiskAssessment(list);
   }
 
   getAllRiskAssessments(vesselId?: string): RiskAssessment[] {

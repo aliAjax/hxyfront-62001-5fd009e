@@ -42,6 +42,7 @@ import {
   selectVesselShiftObject,
   selectActiveRecords,
   selectLatestRecord,
+  selectLatestRiskAssessment,
   selectAllActiveRecords,
   selectCurrentShiftActiveRecords,
   selectHandoverSummary,
@@ -529,10 +530,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   );
 
   const latestRiskAssessment = useMemo(() => {
-    if (currentRiskAssessments.length === 0) return null;
-    return currentRiskAssessments.reduce((latest, r) =>
-      new Date(r.calculatedAt) > new Date(latest.calculatedAt) ? r : latest
-    );
+    return selectLatestRiskAssessment(currentRiskAssessments);
   }, [currentRiskAssessments]);
 
   const calculateRisk = useCallback(
