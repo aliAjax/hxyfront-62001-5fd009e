@@ -1271,9 +1271,8 @@ class WatchRepository {
         ...Object.keys(this.riskAssessments),
       ];
       if (topKeys.length === 0) return false;
-      const hasVesselKey = topKeys.some((k) => k === DEFAULT_VESSEL_ID || k.length > 20);
       const hasShiftKey = topKeys.some((k) => /^\d{2}-\d{2}$/.test(k));
-      return hasShiftKey && !hasVesselKey;
+      return hasShiftKey;
     };
 
     const needsMigration = !storedVersion || storedVersion !== SCHEMA_VERSION || dataLooksLegacy();
