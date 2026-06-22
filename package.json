@@ -3,9 +3,13 @@
     "dev": "vite --host 0.0.0.0 --port 62001",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 62001",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "build:check": "npm run typecheck && npm run build",
+    "quality": "npm run typecheck && npm run test && npm run build",
+    "quality:coverage": "npm run typecheck && npm run test:coverage && npm run build"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
