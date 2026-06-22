@@ -23,6 +23,7 @@ import {
   type RiskTrigger,
   type RiskTimelineEvent,
   type HandoverStep,
+  type Vessel,
   SHIFTS,
   getPreviousShiftId,
   generateIdempotencyKey,
@@ -44,6 +45,12 @@ import {
 import { getRepository } from "./repository";
 
 interface ShiftContextValue {
+  vessels: Vessel[];
+  currentVessel: Vessel | null;
+  setCurrentVesselId: (id: string) => void;
+  addVessel: (vessel: Omit<Vessel, "id" | "createdAt" | "updatedAt">) => Vessel;
+  updateVessel: (id: string, patch: Partial<Vessel>) => Vessel | null;
+  deleteVessel: (id: string) => boolean;
   shifts: Shift[];
   currentShift: Shift;
   setCurrentShiftId: (id: string) => void;
@@ -61,7 +68,7 @@ interface ShiftContextValue {
   deleteEngineRoomRecord: (id: string) => void;
   anomalyRecords: Record<string, AnomalyRecord[]>;
   allAnomalyRecords: AnomalyRecord[];
-  addAnomalyRecord: (record: Omit<AnomalyRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "initialStatus" | "currentStatus" | "statusHistory" | "carryOverFromShiftId" | "isCarriedOver"> & { status: AnomalyStatus; idempotencyKey?: string }) => { record: AnomalyRecord; created: boolean };
+  addAnomalyRecord: (record: Omit<AnomalyRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "initialStatus" | "currentStatus" | "statusHistory" | "carryOverFromShiftId" | "isCarriedOver" | "originShiftId" | "handoverPath" | "closedAtShiftId" | "closedAt" | "closedBy"> & { status: AnomalyStatus; idempotencyKey?: string }) => { record: AnomalyRecord; created: boolean };
   updateAnomalyStatus: (recordId: string, newStatus: AnomalyStatus, note: string, operator: string) => void;
   updateAnomalyRecord: (id: string, patch: Partial<AnomalyRecord>) => AnomalyRecord | null;
   deleteAnomalyRecord: (id: string) => void;
@@ -77,6 +84,8 @@ interface ShiftContextValue {
   previousShiftSummary: HandoverSummary | null;
   saveHandover: (manualNote: string, isDraft: boolean) => void;
   exportData: () => void;
+  exportDataForVessel: (vesselId?: string) => void;
+  exportAllData: () => void;
   importData: (data: ExportData, strategy: ImportStrategy) => void;
   getAllData: () => ExportData;
   carryOverAnomaliesToShift: (anomalyIds: string[], targetShiftId: string) => AnomalyRecord[];
@@ -107,6 +116,8 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   const repository = useMemo(() => getRepository(), []);
   const initialState = useMemo(() => repository.getState(), [repository]);
 
+  const [vessels, setVessels] = useState<Vessel[]>(initialState.vessels);
+  const [currentVesselId, setCurrentVesselIdState] = useState<string>(initialState.currentVesselId);
   const [currentShiftId, setCurrentShiftIdState] = useState(initialState.currentShiftId);
   const [records, setRecords] = useState(initialState.records);
   const [engineRoomRecords, setEngineRoomRecords] = useState(initialState.engineRoomRecords);
@@ -120,6 +131,8 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
 
   const refreshState = useCallback(() => {
     const state = repository.getState();
+    setVessels(state.vessels);
+    setCurrentVesselIdState(state.currentVesselId);
     setCurrentShiftIdState(state.currentShiftId);
     setRecords(state.records);
     setEngineRoomRecords(state.engineRoomRecords);
@@ -138,11 +151,71 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
       repository.on("handover:changed", refreshState),
       repository.on("risk:changed", refreshState),
       repository.on("shift:changed", refreshState),
+      repository.on("vessel:changed", refreshState),
+      repository.on("vessels:changed", refreshState),
     ];
     return () => {
       handlers.forEach((off) => off());
     };
   }, [repository, refreshState]);
+
+  const currentVessel = useMemo(
+    () => vessels.find((v) => v.id === currentVesselId) ?? vessels[0] ?? null,
+    [vessels, currentVesselId]
+  );
+
+  const flatRecords = useMemo(
+    () => (records[currentVesselId] ?? {}) as Record<string, WatchRecord[]>,
+    [records, currentVesselId]
+  );
+  const flatEngineRoomRecords = useMemo(
+    () => (engineRoomRecords[currentVesselId] ?? {}) as Record<string, EngineRoomRecord[]>,
+    [engineRoomRecords, currentVesselId]
+  );
+  const flatAnomalyRecords = useMemo(
+    () => (anomalyRecords[currentVesselId] ?? {}) as Record<string, AnomalyRecord[]>,
+    [anomalyRecords, currentVesselId]
+  );
+  const flatBilgeWaterRecords = useMemo(
+    () => (bilgeWaterRecords[currentVesselId] ?? {}) as Record<string, BilgeWaterRecord[]>,
+    [bilgeWaterRecords, currentVesselId]
+  );
+  const flatHandoverSummaries = useMemo(
+    () => (handoverSummaries[currentVesselId] ?? {}) as Record<string, HandoverSummary>,
+    [handoverSummaries, currentVesselId]
+  );
+  const flatRiskAssessments = useMemo(
+    () => (riskAssessments[currentVesselId] ?? {}) as Record<string, RiskAssessment[]>,
+    [riskAssessments, currentVesselId]
+  );
+
+  const setCurrentVesselId = useCallback(
+    (id: string) => {
+      repository.setCurrentVesselId(id);
+    },
+    [repository]
+  );
+
+  const addVessel = useCallback(
+    (vessel: Omit<Vessel, "id" | "createdAt" | "updatedAt">): Vessel => {
+      return repository.addVessel(vessel);
+    },
+    [repository]
+  );
+
+  const updateVessel = useCallback(
+    (id: string, patch: Partial<Vessel>): Vessel | null => {
+      return repository.updateVessel(id, patch);
+    },
+    [repository]
+  );
+
+  const deleteVessel = useCallback(
+    (id: string): boolean => {
+      return repository.deleteVessel(id);
+    },
+    [repository]
+  );
 
   const currentShift = useMemo(
     () => SHIFTS.find((s) => s.id === currentShiftId) ?? SHIFTS[0],
@@ -157,23 +230,23 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   );
 
   const currentRecords = useMemo(
-    () => (records[currentShiftId] ?? []).filter((r) => !r.deletedAt),
-    [records, currentShiftId]
+    () => (flatRecords[currentShiftId] ?? []).filter((r) => !r.deletedAt),
+    [flatRecords, currentShiftId]
   );
 
   const currentEngineRoomRecords = useMemo(
-    () => (engineRoomRecords[currentShiftId] ?? []).filter((r) => !r.deletedAt),
-    [engineRoomRecords, currentShiftId]
+    () => (flatEngineRoomRecords[currentShiftId] ?? []).filter((r) => !r.deletedAt),
+    [flatEngineRoomRecords, currentShiftId]
   );
 
   const currentBilgeWaterRecords = useMemo(
-    () => (bilgeWaterRecords[currentShiftId] ?? []).filter((r) => !r.deletedAt),
-    [bilgeWaterRecords, currentShiftId]
+    () => (flatBilgeWaterRecords[currentShiftId] ?? []).filter((r) => !r.deletedAt),
+    [flatBilgeWaterRecords, currentShiftId]
   );
 
   const allEngineRoomRecords = useMemo(
-    () => Object.values(engineRoomRecords).flat().filter((r) => !r.deletedAt),
-    [engineRoomRecords]
+    () => Object.values(flatEngineRoomRecords).flat().filter((r) => !r.deletedAt),
+    [flatEngineRoomRecords]
   );
 
   const latestEngineRoomRecord = useMemo(() => {
@@ -184,8 +257,8 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   }, [allEngineRoomRecords]);
 
   const allBilgeWaterRecords = useMemo(
-    () => Object.values(bilgeWaterRecords).flat().filter((r) => !r.deletedAt),
-    [bilgeWaterRecords]
+    () => Object.values(flatBilgeWaterRecords).flat().filter((r) => !r.deletedAt),
+    [flatBilgeWaterRecords]
   );
 
   const latestBilgeWaterRecord = useMemo(() => {
@@ -196,24 +269,24 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   }, [allBilgeWaterRecords]);
 
   const allAnomalyRecords = useMemo(
-    () => Object.values(anomalyRecords).flat().filter((r) => !r.deletedAt),
-    [anomalyRecords]
+    () => Object.values(flatAnomalyRecords).flat().filter((r) => !r.deletedAt),
+    [flatAnomalyRecords]
   );
 
   const currentHandoverSummary = useMemo(
     () => {
-      const s = handoverSummaries[currentShiftId];
+      const s = flatHandoverSummaries[currentShiftId];
       return s && !s.deletedAt ? s : null;
     },
-    [handoverSummaries, currentShiftId]
+    [flatHandoverSummaries, currentShiftId]
   );
 
   const previousShiftSummary = useMemo(() => {
     const prevId = getPreviousShiftId(currentShiftId);
     if (!prevId) return null;
-    const s = handoverSummaries[prevId];
+    const s = flatHandoverSummaries[prevId];
     return s && !s.deletedAt ? s : null;
-  }, [handoverSummaries, currentShiftId]);
+  }, [flatHandoverSummaries, currentShiftId]);
 
   const carriedOverAnomalies = useMemo(() => {
     return repository.listCarriedOverAnomalies(currentShiftId);
@@ -308,7 +381,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   );
 
   const addAnomalyRecord = useCallback(
-    (input: Omit<AnomalyRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "initialStatus" | "currentStatus" | "statusHistory" | "carryOverFromShiftId" | "isCarriedOver"> & { status: AnomalyStatus; idempotencyKey?: string }) => {
+    (input: Omit<AnomalyRecord, "id" | "shiftId" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "vesselId" | "fleetId" | "deletedAt" | "idempotencyKey" | "initialStatus" | "currentStatus" | "statusHistory" | "carryOverFromShiftId" | "isCarriedOver" | "originShiftId" | "handoverPath" | "closedAtShiftId" | "closedAt" | "closedBy"> & { status: AnomalyStatus; idempotencyKey?: string }) => {
       const key = input.idempotencyKey ?? generateIdempotencyKey();
       setLastSubmissionKey(key);
       const result = repository.addAnomalyRecord({ ...input, shiftId: currentShiftId, idempotencyKey: key });
@@ -362,11 +435,11 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
       parts.push(`═══════════════════════════════`);
 
       const stats: string[] = [];
-      const shiftEngineRecords = (engineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
-      const shiftBilgeRecords = (bilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
-      const shiftAllAnomalies = (anomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftEngineRecords = (flatEngineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftBilgeRecords = (flatBilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftAllAnomalies = (flatAnomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
       const shiftAnomalies = shiftAllAnomalies.filter((r) => r.currentStatus !== "已关闭");
-      const shiftAllRecords = (records[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftAllRecords = (flatRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
       const shiftUnfinishedRecords = shiftAllRecords.filter(
         (r) => r.status && r.status !== "已解决" && r.status !== "正常巡检"
       );
@@ -547,25 +620,25 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
 
       return parts.join("\n");
     },
-    [currentShiftId, engineRoomRecords, bilgeWaterRecords, anomalyRecords, records]
+    [currentShiftId, flatEngineRoomRecords, flatBilgeWaterRecords, flatAnomalyRecords, flatRecords]
   );
 
   const isDataDirty = useCallback(
     (shiftId?: string): boolean => {
       const targetShift = shiftId ?? currentShiftId;
-      const summary = handoverSummaries[targetShift];
+      const summary = flatHandoverSummaries[targetShift];
       if (!summary || !summary.dataHash) return true;
 
       const shiftData = {
-        records: (records[targetShift] ?? []).filter((r) => !r.deletedAt),
-        engineRoomRecords: (engineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
-        anomalyRecords: (anomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
-        bilgeWaterRecords: (bilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
+        records: (flatRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
+        engineRoomRecords: (flatEngineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
+        anomalyRecords: (flatAnomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
+        bilgeWaterRecords: (flatBilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
       };
       const currentHash = computeDataHash(shiftData);
       return currentHash !== summary.dataHash;
     },
-    [currentShiftId, handoverSummaries, records, engineRoomRecords, anomalyRecords, bilgeWaterRecords]
+    [currentShiftId, flatHandoverSummaries, flatRecords, flatEngineRoomRecords, flatAnomalyRecords, flatBilgeWaterRecords]
   );
 
   const saveHandover = useCallback(
@@ -573,10 +646,10 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
       const targetShift = currentShiftId;
       const autoSummary = generateAutoSummary(targetShift);
       const shiftData = {
-        records: (records[targetShift] ?? []).filter((r) => !r.deletedAt),
-        engineRoomRecords: (engineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
-        anomalyRecords: (anomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
-        bilgeWaterRecords: (bilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
+        records: (flatRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
+        engineRoomRecords: (flatEngineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
+        anomalyRecords: (flatAnomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
+        bilgeWaterRecords: (flatBilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt),
       };
       const dataHash = computeDataHash(shiftData);
       repository.saveHandoverSummary(
@@ -585,17 +658,31 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         currentShift.label
       );
     },
-    [repository, currentShiftId, currentShift.label, generateAutoSummary, records, engineRoomRecords, anomalyRecords, bilgeWaterRecords]
+    [repository, currentShiftId, currentShift.label, generateAutoSummary, flatRecords, flatEngineRoomRecords, flatAnomalyRecords, flatBilgeWaterRecords]
   );
 
   const getAllData = useCallback((): ExportData => {
     return repository.getExportData();
   }, [repository]);
 
-  const exportData = useCallback(() => {
-    const data = getAllData();
+  const exportAllData = useCallback(() => {
+    const data = repository.getExportData();
     downloadExportFile(data);
-  }, [getAllData]);
+  }, [repository]);
+
+  const exportDataForVessel = useCallback(
+    (vesselId?: string) => {
+      const targetVesselId = vesselId ?? currentVesselId;
+      const vessel = vessels.find((v) => v.id === targetVesselId);
+      const data = repository.getExportDataForVessel(targetVesselId);
+      downloadExportFile(data, vessel?.name);
+    },
+    [repository, currentVesselId, vessels]
+  );
+
+  const exportData = useCallback(() => {
+    exportDataForVessel();
+  }, [exportDataForVessel]);
 
   const importData = useCallback(
     (data: ExportData, strategy: ImportStrategy) => {
@@ -607,7 +694,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const prevId = prevShiftIdRef.current;
     if (prevId !== currentShiftId) {
-      const prevAnomalies = (anomalyRecords[prevId] ?? []).filter(
+      const prevAnomalies = (flatAnomalyRecords[prevId] ?? []).filter(
         (r) => !r.deletedAt && r.currentStatus !== "已关闭"
       );
       if (prevAnomalies.length > 0) {
@@ -615,16 +702,16 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
       }
       prevShiftIdRef.current = currentShiftId;
     }
-  }, [currentShiftId, anomalyRecords]);
+  }, [currentShiftId, flatAnomalyRecords]);
 
   const currentRiskAssessments = useMemo(
-    () => (riskAssessments[currentShiftId] ?? []).filter((r) => !r.deletedAt),
-    [riskAssessments, currentShiftId]
+    () => (flatRiskAssessments[currentShiftId] ?? []).filter((r) => !r.deletedAt),
+    [flatRiskAssessments, currentShiftId]
   );
 
   const allRiskAssessments = useMemo(
-    () => Object.values(riskAssessments).flat().filter((r) => !r.deletedAt),
-    [riskAssessments]
+    () => Object.values(flatRiskAssessments).flat().filter((r) => !r.deletedAt),
+    [flatRiskAssessments]
   );
 
   const latestRiskAssessment = useMemo(() => {
@@ -644,9 +731,9 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   const computeRiskOnTheFly = useCallback(
     (shiftId?: string): RiskAssessment | null => {
       const targetShift = shiftId ?? currentShiftId;
-      const shiftEngineRecords = (engineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
-      const shiftBilgeRecords = (bilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
-      const shiftAnomalyRecords = (anomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftEngineRecords = (flatEngineRoomRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftBilgeRecords = (flatBilgeWaterRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
+      const shiftAnomalyRecords = (flatAnomalyRecords[targetShift] ?? []).filter((r) => !r.deletedAt);
 
       if (
         shiftEngineRecords.length === 0 &&
@@ -685,45 +772,53 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         deletedAt: null,
       } as RiskAssessment;
     },
-    [currentShiftId, engineRoomRecords, bilgeWaterRecords, anomalyRecords]
+    [currentShiftId, flatEngineRoomRecords, flatBilgeWaterRecords, flatAnomalyRecords]
   );
 
   return (
     <ShiftContext.Provider
       value={{
+        vessels,
+        currentVessel,
+        setCurrentVesselId,
+        addVessel,
+        updateVessel,
+        deleteVessel,
         shifts: SHIFTS,
         currentShift,
         setCurrentShiftId,
-        records,
+        records: flatRecords,
         currentRecords,
         addRecord,
         removeRecord,
         updateRecord,
         deleteRecord,
-        engineRoomRecords,
+        engineRoomRecords: flatEngineRoomRecords,
         currentEngineRoomRecords,
         latestEngineRoomRecord,
         addEngineRoomRecord,
         updateEngineRoomRecord,
         deleteEngineRoomRecord,
-        anomalyRecords,
+        anomalyRecords: flatAnomalyRecords,
         allAnomalyRecords,
         addAnomalyRecord,
         updateAnomalyStatus,
         updateAnomalyRecord,
         deleteAnomalyRecord,
-        bilgeWaterRecords,
+        bilgeWaterRecords: flatBilgeWaterRecords,
         currentBilgeWaterRecords,
         latestBilgeWaterRecord,
         allBilgeWaterRecords,
         addBilgeWaterRecord,
         updateBilgeWaterRecord,
         deleteBilgeWaterRecord,
-        handoverSummaries,
+        handoverSummaries: flatHandoverSummaries,
         currentHandoverSummary,
         previousShiftSummary,
         saveHandover,
         exportData,
+        exportDataForVessel,
+        exportAllData,
         importData,
         getAllData,
         carryOverAnomaliesToShift,
@@ -731,7 +826,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         generateAutoSummary,
         isDataDirty,
         lastSubmissionKey,
-        riskAssessments,
+        riskAssessments: flatRiskAssessments,
         currentRiskAssessments,
         latestRiskAssessment,
         allRiskAssessments,

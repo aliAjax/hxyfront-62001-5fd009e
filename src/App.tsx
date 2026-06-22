@@ -1,6 +1,7 @@
 import "./styles.css";
 import { useState, useEffect } from "react";
 import { ShiftProvider } from "./shifts/ShiftContext";
+import { VesselSelector } from "./shifts/VesselSelector";
 import { ShiftSelector } from "./shifts/ShiftSelector";
 import { EngineRoomPanel } from "./shifts/EngineRoomPanel";
 import { AnomalyTimeline } from "./shifts/AnomalyTimeline";
@@ -384,6 +385,8 @@ function AppContent() {
           当前值班：<strong>{currentShift.label}</strong>（{String(currentShift.startHour).padStart(2, "0")}:00 - {String(currentShift.endHour).padStart(2, "0")}:00）
         </span>
       </section>
+
+      <VesselSelector />
 
       <ShiftSelector />
 

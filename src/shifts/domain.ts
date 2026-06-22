@@ -1,4 +1,5 @@
-export const SCHEMA_VERSION = "3.0.0";
+export const SCHEMA_VERSION = "4.0.0";
+export const DEFAULT_VESSEL_ID = "default-vessel";
 
 export type RiskLevel = "safe" | "low" | "medium" | "high" | "critical";
 
@@ -78,6 +79,17 @@ export interface WithAudit {
   createdBy: string;
   updatedAt: string;
   updatedBy: string;
+}
+
+export interface Vessel {
+  id: string;
+  name: string;
+  imoNumber?: string;
+  mmsi?: string;
+  fleetId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isDefault?: boolean;
 }
 
 export interface WithVessel {
@@ -230,16 +242,26 @@ export interface ExportData {
   version: string;
   schemaVersion: string;
   exportedAt: string;
+  vessels?: Vessel[];
+  currentVesselId?: string;
   records: Record<string, WatchRecord[]>;
   engineRoomRecords: Record<string, EngineRoomRecord[]>;
   anomalyRecords: Record<string, AnomalyRecord[]>;
   bilgeWaterRecords: Record<string, BilgeWaterRecord[]>;
   handoverSummaries: Record<string, HandoverSummary>;
   riskAssessments?: Record<string, RiskAssessment[]>;
+  vesselScopedData?: Record<string, {
+    records: Record<string, WatchRecord[]>;
+    engineRoomRecords: Record<string, EngineRoomRecord[]>;
+    anomalyRecords: Record<string, AnomalyRecord[]>;
+    bilgeWaterRecords: Record<string, BilgeWaterRecord[]>;
+    handoverSummaries: Record<string, HandoverSummary>;
+    riskAssessments: Record<string, RiskAssessment[]>;
+  }>;
   meta?: DataMeta;
 }
 
-export const EXPORT_VERSION = "2.0.0";
+export const EXPORT_VERSION = "3.0.0";
 
 export type ImportStrategy = "merge" | "overwrite";
 
@@ -255,6 +277,7 @@ export interface ImportPreview {
   data: ExportData | null;
   errors: string[];
   stats: {
+    totalVessels: number;
     totalRecords: number;
     totalEngineRoomRecords: number;
     totalAnomalyRecords: number;
@@ -262,6 +285,7 @@ export interface ImportPreview {
     totalHandoverSummaries: number;
     totalRiskAssessments: number;
     shifts: string[];
+    vesselNames: string[];
   };
   conflicts: ImportConflict[];
 }
@@ -351,6 +375,8 @@ export function computeDataHash(obj: unknown): string {
   return `${hash.toString(16)}-${jsonStr.length}`;
 }
 
+const STORAGE_KEY_VESSELS = "watch-vessels";
+const STORAGE_KEY_CURRENT_VESSEL = "watch-current-vessel";
 const STORAGE_KEY_SHIFT = "watch-current-shift";
 const STORAGE_KEY_RECORDS = "watch-records";
 const STORAGE_KEY_ENGINE_ROOM = "engine-room-records";
@@ -358,6 +384,56 @@ const STORAGE_KEY_ANOMALIES = "anomaly-inspection-records";
 const STORAGE_KEY_HANDOVER = "handover-summaries";
 const STORAGE_KEY_BILGE = "bilge-water-records";
 const STORAGE_KEY_RISK = "risk-assessments";
+
+export function createDefaultVessel(): Vessel {
+  const now = new Date().toISOString();
+  return {
+    id: DEFAULT_VESSEL_ID,
+    name: "默认船舶",
+    fleetId: null,
+    createdAt: now,
+    updatedAt: now,
+    isDefault: true,
+  };
+}
+
+export function loadVessels(): Vessel[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_VESSELS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const hasDefault = parsed.some((v) => v.id === DEFAULT_VESSEL_ID);
+        if (!hasDefault) {
+          return [createDefaultVessel(), ...parsed];
+        }
+        return parsed;
+      }
+    }
+  } catch {}
+  return [createDefaultVessel()];
+}
+
+export function saveVessels(vessels: Vessel[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_VESSELS, JSON.stringify(vessels));
+  } catch {}
+}
+
+export function loadCurrentVesselId(): string {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_CURRENT_VESSEL);
+    const vessels = loadVessels();
+    if (stored && vessels.some((v) => v.id === stored)) return stored;
+  } catch {}
+  return DEFAULT_VESSEL_ID;
+}
+
+export function saveCurrentVesselId(id: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_CURRENT_VESSEL, id);
+  } catch {}
+}
 
 export function loadCurrentShiftId(): string {
   try {
@@ -894,37 +970,51 @@ export function calculateRiskAssessment(input: RiskCalculationInput): Omit<RiskA
 }
 
 export function createExportData(
+  vessels: Vessel[],
+  currentVesselId: string,
   records: Record<string, WatchRecord[]>,
   engineRoomRecords: Record<string, EngineRoomRecord[]>,
   anomalyRecords: Record<string, AnomalyRecord[]>,
   bilgeWaterRecords: Record<string, BilgeWaterRecord[]>,
   handoverSummaries: Record<string, HandoverSummary>,
-  riskAssessments?: Record<string, RiskAssessment[]>
+  riskAssessments?: Record<string, RiskAssessment[]>,
+  vesselScopedData?: Record<string, {
+    records: Record<string, WatchRecord[]>;
+    engineRoomRecords: Record<string, EngineRoomRecord[]>;
+    anomalyRecords: Record<string, AnomalyRecord[]>;
+    bilgeWaterRecords: Record<string, BilgeWaterRecord[]>;
+    handoverSummaries: Record<string, HandoverSummary>;
+    riskAssessments: Record<string, RiskAssessment[]>;
+  }>
 ): ExportData {
   return {
     version: EXPORT_VERSION,
     schemaVersion: SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
+    vessels,
+    currentVesselId,
     records,
     engineRoomRecords,
     anomalyRecords,
     bilgeWaterRecords,
     handoverSummaries,
     riskAssessments,
+    vesselScopedData,
     meta: {
       schemaVersion: SCHEMA_VERSION,
     },
   };
 }
 
-export function downloadExportFile(data: ExportData): void {
+export function downloadExportFile(data: ExportData, vesselName?: string): void {
   const jsonStr = JSON.stringify(data, null, 2);
   const blob = new Blob([jsonStr], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   const dateStr = new Date().toISOString().slice(0, 10);
-  a.download = `watch-records-${dateStr}.json`;
+  const safeVesselName = vesselName ? vesselName.replace(/[^\w\u4e00-\u9fa5-]/g, "_") : "";
+  a.download = `watch-records${safeVesselName ? "-" + safeVesselName : ""}-${dateStr}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -943,6 +1033,7 @@ export function validateAndParseImportFile(text: string): ImportPreview {
       data: null,
       errors: ["文件格式错误，不是有效的 JSON 文件"],
       stats: {
+        totalVessels: 0,
         totalRecords: 0,
         totalEngineRoomRecords: 0,
         totalAnomalyRecords: 0,
@@ -950,6 +1041,7 @@ export function validateAndParseImportFile(text: string): ImportPreview {
         totalHandoverSummaries: 0,
         totalRiskAssessments: 0,
         shifts: [],
+        vesselNames: [],
       },
       conflicts: [],
     };
@@ -989,6 +1081,7 @@ export function validateAndParseImportFile(text: string): ImportPreview {
       data: null,
       errors,
       stats: {
+        totalVessels: 0,
         totalRecords: 0,
         totalEngineRoomRecords: 0,
         totalAnomalyRecords: 0,
@@ -996,6 +1089,7 @@ export function validateAndParseImportFile(text: string): ImportPreview {
         totalHandoverSummaries: 0,
         totalRiskAssessments: 0,
         shifts: [],
+        vesselNames: [],
       },
       conflicts: [],
     };
@@ -1003,10 +1097,20 @@ export function validateAndParseImportFile(text: string): ImportPreview {
 
   const validData = data as ExportData;
 
+  if (!validData.vessels || validData.vessels.length === 0) {
+    validData.vessels = [createDefaultVessel()];
+    validData.currentVesselId = DEFAULT_VESSEL_ID;
+  }
+
   const allShiftIds = new Set<string>();
+  const allVesselNames = new Set<string>();
+
   const collectShifts = (obj: Record<string, unknown>) => {
     Object.keys(obj).forEach((k) => allShiftIds.add(k));
   };
+
+  validData.vessels.forEach((v) => allVesselNames.add(v.name));
+
   collectShifts(validData.records);
   collectShifts(validData.engineRoomRecords);
   collectShifts(validData.anomalyRecords);
@@ -1016,21 +1120,52 @@ export function validateAndParseImportFile(text: string): ImportPreview {
     collectShifts(validData.riskAssessments);
   }
 
+  if (validData.vesselScopedData) {
+    Object.values(validData.vesselScopedData).forEach((vData) => {
+      collectShifts(vData.records);
+      collectShifts(vData.engineRoomRecords);
+      collectShifts(vData.anomalyRecords);
+      collectShifts(vData.bilgeWaterRecords);
+      collectShifts(vData.handoverSummaries);
+      collectShifts(vData.riskAssessments);
+    });
+  }
+
   const sumRecords = (obj: Record<string, unknown[]>) =>
     Object.values(obj).reduce((acc, arr) => acc + (Array.isArray(arr) ? arr.length : 0), 0);
+
+  let totalRecords = sumRecords(validData.records as Record<string, unknown[]>);
+  let totalEngineRoom = sumRecords(validData.engineRoomRecords as Record<string, unknown[]>);
+  let totalAnomalies = sumRecords(validData.anomalyRecords as Record<string, unknown[]>);
+  let totalBilge = sumRecords(validData.bilgeWaterRecords as Record<string, unknown[]>);
+  let totalHandover = Object.keys(validData.handoverSummaries).length;
+  let totalRisk = validData.riskAssessments ? sumRecords(validData.riskAssessments as Record<string, unknown[]>) : 0;
+
+  if (validData.vesselScopedData) {
+    Object.values(validData.vesselScopedData).forEach((vData) => {
+      totalRecords += sumRecords(vData.records as Record<string, unknown[]>);
+      totalEngineRoom += sumRecords(vData.engineRoomRecords as Record<string, unknown[]>);
+      totalAnomalies += sumRecords(vData.anomalyRecords as Record<string, unknown[]>);
+      totalBilge += sumRecords(vData.bilgeWaterRecords as Record<string, unknown[]>);
+      totalHandover += Object.keys(vData.handoverSummaries).length;
+      totalRisk += sumRecords(vData.riskAssessments as Record<string, unknown[]>);
+    });
+  }
 
   return {
     valid: true,
     data: validData,
     errors: [],
     stats: {
-      totalRecords: sumRecords(validData.records as Record<string, unknown[]>),
-      totalEngineRoomRecords: sumRecords(validData.engineRoomRecords as Record<string, unknown[]>),
-      totalAnomalyRecords: sumRecords(validData.anomalyRecords as Record<string, unknown[]>),
-      totalBilgeWaterRecords: sumRecords(validData.bilgeWaterRecords as Record<string, unknown[]>),
-      totalHandoverSummaries: Object.keys(validData.handoverSummaries).length,
-      totalRiskAssessments: validData.riskAssessments ? sumRecords(validData.riskAssessments as Record<string, unknown[]>) : 0,
+      totalVessels: validData.vessels?.length ?? 0,
+      totalRecords,
+      totalEngineRoomRecords: totalEngineRoom,
+      totalAnomalyRecords: totalAnomalies,
+      totalBilgeWaterRecords: totalBilge,
+      totalHandoverSummaries: totalHandover,
+      totalRiskAssessments: totalRisk,
       shifts: Array.from(allShiftIds),
+      vesselNames: Array.from(allVesselNames),
     },
     conflicts: [],
   };

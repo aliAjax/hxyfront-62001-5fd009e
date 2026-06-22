@@ -32,7 +32,8 @@ function getShiftLabel(shiftId: string): string {
   return shift ? shift.label : shiftId;
 }
 
-type ExportScope = "all" | "current";
+type ExportVesselScope = "allVessels" | "currentVessel";
+type ExportShiftScope = "allShifts" | "currentShift";
 
 interface ShiftDataPreview {
   shiftId: string;
@@ -94,6 +95,8 @@ function buildShiftPreview(
 export function DataManager() {
   const {
     exportData,
+    exportDataForVessel,
+    exportAllData,
     importData,
     records,
     engineRoomRecords,
@@ -102,6 +105,8 @@ export function DataManager() {
     handoverSummaries,
     riskAssessments,
     currentShift,
+    currentVessel,
+    vessels,
     getAllData,
   } = useShift();
 
@@ -112,7 +117,8 @@ export function DataManager() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [importStep, setImportStep] = useState<"upload" | "preview" | "confirm">("upload");
-  const [exportScope, setExportScope] = useState<ExportScope>("all");
+  const [exportVesselScope, setExportVesselScope] = useState<ExportVesselScope>("currentVessel");
+  const [exportShiftScope, setExportShiftScope] = useState<ExportShiftScope>("allShifts");
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -147,29 +153,30 @@ export function DataManager() {
   }, [allShiftIds, records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries, riskAssessments]);
 
   const exportPreviewData = useMemo(() => {
-    if (exportScope === "current") {
-      const sid = currentShift.id;
-      const filteredRecords: Record<string, WatchRecord[]> = { [sid]: records[sid] ?? [] };
-      const filteredEngine: Record<string, EngineRoomRecord[]> = { [sid]: engineRoomRecords[sid] ?? [] };
-      const filteredAnomaly: Record<string, AnomalyRecord[]> = { [sid]: anomalyRecords[sid] ?? [] };
-      const filteredBilge: Record<string, BilgeWaterRecord[]> = { [sid]: bilgeWaterRecords[sid] ?? [] };
-      const filteredHandover: Record<string, HandoverSummary> = handoverSummaries[sid]
-        ? { [sid]: handoverSummaries[sid] }
-        : {};
-      const filteredRisk: Record<string, RiskAssessment[]> = riskAssessments[sid]
-        ? { [sid]: riskAssessments[sid] }
-        : {};
-      return { filteredRecords, filteredEngine, filteredAnomaly, filteredBilge, filteredHandover, filteredRisk };
-    }
-    return {
-      filteredRecords: records,
-      filteredEngine: engineRoomRecords,
-      filteredAnomaly: anomalyRecords,
-      filteredBilge: bilgeWaterRecords,
-      filteredHandover: handoverSummaries,
-      filteredRisk: riskAssessments,
+    const getFilteredByShift = (
+      data: Record<string, any>) => {
+        if (exportShiftScope === "currentShift") {
+          const sid = currentShift.id;
+          return { [sid]: data[sid] ?? [] };
+        }
+        return data;
+      };
+    const getFilteredHandoverByShift = () => {
+      if (exportShiftScope === "currentShift") {
+        const sid = currentShift.id;
+        return handoverSummaries[sid] ? { [sid]: handoverSummaries[sid] } : {};
+      }
+      return handoverSummaries;
     };
-  }, [exportScope, currentShift.id, records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries, riskAssessments]);
+    return {
+      filteredRecords: getFilteredByShift(records),
+      filteredEngine: getFilteredByShift(engineRoomRecords),
+      filteredAnomaly: getFilteredByShift(anomalyRecords),
+      filteredBilge: getFilteredByShift(bilgeWaterRecords),
+      filteredHandover: getFilteredHandoverByShift(),
+      filteredRisk: getFilteredByShift(riskAssessments),
+    };
+  }, [exportShiftScope, currentShift.id, records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries, riskAssessments]);
 
   const exportStats = useMemo(() => {
     const sum = (obj: Record<string, unknown[]>) =>
@@ -245,22 +252,31 @@ export function DataManager() {
   };
 
   const handleExport = useCallback(() => {
-    if (exportScope === "current") {
-      const sid = currentShift.id;
-      const data = createExportData(
-        { [sid]: records[sid] ?? [] },
-        { [sid]: engineRoomRecords[sid] ?? [] },
-        { [sid]: anomalyRecords[sid] ?? [] },
-        { [sid]: bilgeWaterRecords[sid] ?? [] },
-        handoverSummaries[sid] ? { [sid]: handoverSummaries[sid] } : {},
-        riskAssessments[sid] ? { [sid]: riskAssessments[sid] } : {},
-      );
-      downloadExportFile(data);
+    if (exportVesselScope === "allVessels") {
+      exportAllData();
     } else {
-      exportData();
+      if (exportShiftScope === "currentShift") {
+        const sid = currentShift.id;
+        const vesselForExport = currentVessel
+          ? [currentVessel]
+          : vessels.slice(0, 1);
+        const data = createExportData(
+          vesselForExport,
+          vesselForExport[0]?.id ?? "",
+          { [sid]: records[sid] ?? [] },
+          { [sid]: engineRoomRecords[sid] ?? [] },
+          { [sid]: anomalyRecords[sid] ?? [] },
+          { [sid]: bilgeWaterRecords[sid] ?? [] },
+          handoverSummaries[sid] ? { [sid]: handoverSummaries[sid] } : {},
+          riskAssessments[sid] ? { [sid]: riskAssessments[sid] } : {},
+        );
+        downloadExportFile(data, currentVessel?.name);
+      } else {
+        exportDataForVessel();
+      }
     }
     setShowExportModal(false);
-  }, [exportScope, currentShift.id, records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries, riskAssessments, exportData]);
+  }, [exportVesselScope, exportShiftScope, currentShift.id, currentVessel, vessels, records, engineRoomRecords, anomalyRecords, bilgeWaterRecords, handoverSummaries, riskAssessments, exportAllData, exportDataForVessel]);
 
   const importShiftPreviews = useMemo(() => {
     if (!preview?.valid || !preview.data) return [];
@@ -394,92 +410,142 @@ export function DataManager() {
             </div>
             <div className="modal-body">
               <div className="dm-export-scope">
-                <h4>导出范围</h4>
+                <h4>船舶范围</h4>
                 <label className="strategy-option">
                   <input
                     type="radio"
-                    name="export-scope"
-                    checked={exportScope === "all"}
-                    onChange={() => setExportScope("all")}
+                    name="export-vessel-scope"
+                    checked={exportVesselScope === "currentVessel"}
+                    onChange={() => setExportVesselScope("currentVessel")}
                   />
                   <div>
-                    <strong>全部班次</strong>
-                    <small>导出所有班次的值班记录、机舱参数、异常记录、舱底水记录、交接摘要和风险评估</small>
+                    <strong>仅当前船舶（{currentVessel?.name ?? "加载中..."}）</strong>
+                    <small>导出当前选中船舶的所有数据，可在下方进一步选择班次范围</small>
                   </div>
                 </label>
                 <label className="strategy-option">
                   <input
                     type="radio"
-                    name="export-scope"
-                    checked={exportScope === "current"}
-                    onChange={() => setExportScope("current")}
+                    name="export-vessel-scope"
+                    checked={exportVesselScope === "allVessels"}
+                    onChange={() => setExportVesselScope("allVessels")}
                   />
                   <div>
-                    <strong>仅当前班次（{currentShift.label}）</strong>
-                    <small>仅导出当前选中班次的全部数据</small>
+                    <strong>全部船舶（共 {vessels.length} 艘）</strong>
+                    <small>导出所有船舶的完整数据（含船舶配置信息），用于完整备份或迁移</small>
                   </div>
                 </label>
               </div>
 
+              {exportVesselScope === "currentVessel" && (
+                <div className="dm-export-scope">
+                  <h4>班次范围</h4>
+                  <label className="strategy-option">
+                    <input
+                      type="radio"
+                      name="export-shift-scope"
+                      checked={exportShiftScope === "allShifts"}
+                      onChange={() => setExportShiftScope("allShifts")}
+                    />
+                    <div>
+                      <strong>全部班次</strong>
+                      <small>导出当前船舶所有班次的值班记录、机舱参数、异常记录、舱底水记录、交接摘要和风险评估</small>
+                    </div>
+                  </label>
+                  <label className="strategy-option">
+                    <input
+                      type="radio"
+                      name="export-shift-scope"
+                      checked={exportShiftScope === "currentShift"}
+                      onChange={() => setExportShiftScope("currentShift")}
+                    />
+                    <div>
+                      <strong>仅当前班次（{currentShift.label}）</strong>
+                      <small>仅导出当前船舶当前选中班次的全部数据</small>
+                    </div>
+                  </label>
+                </div>
+              )}
+
               <div className="dm-export-preview">
                 <h4>导出内容预览</h4>
-                <div className="preview-stats">
-                  <div className="preview-stat-item">
-                    <small>值班记录</small>
-                    <strong>{exportStats.records}</strong>
+                {exportVesselScope === "allVessels" ? (
+                  <div className="dm-vessel-overview">
+                    <div className="preview-stat-item">
+                      <small>船舶总数</small>
+                      <strong>{vessels.length}</strong>
+                    </div>
+                    <div className="dm-vessel-names">
+                      {vessels.map((v) => (
+                        <span key={v.id} className="dm-vessel-chip">
+                          {v.name}
+                          {v.isDefault && <em>默认</em>}
+                        </span>
+                      ))}
+                    </div>
+                    <small className="dm-hint">包含所有船舶的完整数据及船舶配置信息</small>
                   </div>
-                  <div className="preview-stat-item">
-                    <small>机舱参数</small>
-                    <strong>{exportStats.engineRoom}</strong>
-                  </div>
-                  <div className="preview-stat-item">
-                    <small>异常记录</small>
-                    <strong>{exportStats.anomalies}</strong>
-                  </div>
-                  <div className="preview-stat-item">
-                    <small>舱底水记录</small>
-                    <strong>{exportStats.bilge}</strong>
-                  </div>
-                  <div className="preview-stat-item">
-                    <small>交接摘要</small>
-                    <strong>{exportStats.handover}</strong>
-                  </div>
-                  <div className="preview-stat-item">
-                    <small>风险评估</small>
-                    <strong>{exportStats.risk}</strong>
-                  </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="preview-stats">
+                      <div className="preview-stat-item">
+                        <small>值班记录</small>
+                        <strong>{exportStats.records}</strong>
+                      </div>
+                      <div className="preview-stat-item">
+                        <small>机舱参数</small>
+                        <strong>{exportStats.engineRoom}</strong>
+                      </div>
+                      <div className="preview-stat-item">
+                        <small>异常记录</small>
+                        <strong>{exportStats.anomalies}</strong>
+                      </div>
+                      <div className="preview-stat-item">
+                        <small>舱底水记录</small>
+                        <strong>{exportStats.bilge}</strong>
+                      </div>
+                      <div className="preview-stat-item">
+                        <small>交接摘要</small>
+                        <strong>{exportStats.handover}</strong>
+                      </div>
+                      <div className="preview-stat-item">
+                        <small>风险评估</small>
+                        <strong>{exportStats.risk}</strong>
+                      </div>
+                    </div>
 
-                <div className="dm-export-content-detail">
-                  <div className="dm-export-section">
-                    <span className="dm-export-section-icon">📋</span>
-                    <div>
-                      <strong>班次与设备</strong>
-                      <small>包含 {exportScope === "all" ? allShiftIds.length : 1} 个班次、{exportScope === "all" ? [...new Set(Object.values(records).flat().filter(r => !r.deletedAt).map(r => r.device))].length : [...new Set((records[currentShift.id] ?? []).filter(r => !r.deletedAt).map(r => r.device))].length} 个设备</small>
+                    <div className="dm-export-content-detail">
+                      <div className="dm-export-section">
+                        <span className="dm-export-section-icon">📋</span>
+                        <div>
+                          <strong>班次与设备</strong>
+                          <small>包含 {exportShiftScope === "allShifts" ? allShiftIds.length : 1} 个班次、{exportShiftScope === "allShifts" ? [...new Set(Object.values(records).flat().filter(r => !r.deletedAt).map(r => r.device))].length : [...new Set((records[currentShift.id] ?? []).filter(r => !r.deletedAt).map(r => r.device))].length} 个设备</small>
+                        </div>
+                      </div>
+                      <div className="dm-export-section">
+                        <span className="dm-export-section-icon">⚙️</span>
+                        <div>
+                          <strong>参数读数</strong>
+                          <small>机舱参数记录 {exportStats.engineRoom} 条（主机转速、滑油压力、冷却水温、燃油消耗）</small>
+                        </div>
+                      </div>
+                      <div className="dm-export-section">
+                        <span className="dm-export-section-icon">⚠️</span>
+                        <div>
+                          <strong>异常记录</strong>
+                          <small>异常巡检记录 {exportStats.anomalies} 条（含状态历史与跨班次遗留信息）</small>
+                        </div>
+                      </div>
+                      <div className="dm-export-section">
+                        <span className="dm-export-section-icon">🔄</span>
+                        <div>
+                          <strong>交接摘要</strong>
+                          <small>交接摘要 {exportStats.handover} 份（含自动摘要与手动备注）</small>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div className="dm-export-section">
-                    <span className="dm-export-section-icon">⚙️</span>
-                    <div>
-                      <strong>参数读数</strong>
-                      <small>机舱参数记录 {exportStats.engineRoom} 条（主机转速、滑油压力、冷却水温、燃油消耗）</small>
-                    </div>
-                  </div>
-                  <div className="dm-export-section">
-                    <span className="dm-export-section-icon">⚠️</span>
-                    <div>
-                      <strong>异常记录</strong>
-                      <small>异常巡检记录 {exportStats.anomalies} 条（含状态历史与跨班次遗留信息）</small>
-                    </div>
-                  </div>
-                  <div className="dm-export-section">
-                    <span className="dm-export-section-icon">🔄</span>
-                    <div>
-                      <strong>交接摘要</strong>
-                      <small>交接摘要 {exportStats.handover} 份（含自动摘要与手动备注）</small>
-                    </div>
-                  </div>
-                </div>
+                  </>
+                )}
               </div>
             </div>
             <div className="modal-footer">
@@ -544,6 +610,22 @@ export function DataManager() {
                   </div>
 
                   <h4>数据概览</h4>
+                  {(preview.stats.totalVessels ?? 0) > 0 && (
+                    <div className="import-vessel-info">
+                      <div className="preview-stat-item">
+                        <small>船舶数量</small>
+                        <strong>{preview.stats.totalVessels}</strong>
+                      </div>
+                      {preview.stats.vesselNames && preview.stats.vesselNames.length > 0 && (
+                        <div className="dm-vessel-names import-vessel-names">
+                          <small>涉及船舶：</small>
+                          {preview.stats.vesselNames.map((vn, i) => (
+                            <span key={i} className="dm-vessel-chip">{vn}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="preview-stats">
                     <div className="preview-stat-item">
                       <small>值班记录</small>

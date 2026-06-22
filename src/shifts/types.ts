@@ -25,10 +25,12 @@ export type {
   ImportPreview,
   ImportStrategy,
   DeviceCategory,
+  Vessel,
 } from "./domain";
 
 export {
   SCHEMA_VERSION,
+  DEFAULT_VESSEL_ID,
   SHIFTS,
   BILGE_WARNING_LEVEL,
   BILGE_DANGER_LEVEL,
@@ -88,4 +90,9 @@ export {
   formatHandoverPath,
   getAnomalyLifecycleStatus,
   buildHandoverStep,
+  createDefaultVessel,
+  loadVessels,
+  saveVessels,
+  loadCurrentVesselId,
+  saveCurrentVesselId,
 } from "./domain";
